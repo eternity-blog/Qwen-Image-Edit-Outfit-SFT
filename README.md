@@ -14,17 +14,19 @@
 数据集：[lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling](https://huggingface.co/datasets/lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling)（IDM synth train/test + v2 metadata；NC 衍生许可）
 
 **从零复现（含全参）：** [docs/REPRODUCE.md](docs/REPRODUCE.md)。  
+**给 Claude Code 在新机器上重建环境：** 根目录 [CLAUDE.md](CLAUDE.md)（按阶段执行即可开训）。  
 相关原理见 [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md)；任务背景见 [docs/BACKGROUND.md](docs/BACKGROUND.md)。
 
 ## 仓库结构
 
 ```text
 .
+├── CLAUDE.md          # Claude Code：新机器环境重建 runbook
 ├── README.md
 ├── LICENSE / NOTICE.md
 ├── TODO.md
 ├── requirements.txt
-├── configs/           # env、DeepSpeed ZeRO-3 示例
+├── configs/           # env、Accelerate ZeRO 配置
 ├── prompts/           # 全文 garment-only 编辑指令
 ├── scripts/           # 数据 / 训练 / 评测 / HF 上传
 ├── docs/
