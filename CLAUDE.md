@@ -1,61 +1,61 @@
-# CLAUDE.md — Agent bootstrap for this repo
+# CLAUDE.md — 本仓库 Agent 环境重建手册
 
-**Audience:** Claude Code (or any coding agent) on a **fresh multi-GPU Linux machine**.  
-**Mission:** Rebuild the full experiment stack so a human can start training with one script.  
-**Do not** redesign the training stack. Prefer existing scripts under `scripts/` and docs under `docs/`.
+**读者：** 在一台**全新多卡 Linux 机器**上工作的 Claude Code（或其它编码 Agent）。  
+**任务：** 把完整实验栈重建好，让人可以用一条脚本启动训练。  
+**禁止**重新设计训练链路。优先使用本仓 `scripts/` 与 `docs/` 里已有内容。
 
-Human-facing narrative: `docs/REPRODUCE.md`. This file is the **executable runbook**.
-
----
-
-## 0. Goal and definition of done
-
-When finished, **all** of the following must be true:
-
-1. Repo cloned; `configs/env.local.sh` exists and is sourced by scripts via `scripts/lib_env.sh`.
-2. Conda/venv at `ENV_DIR` has: `torch`, `accelerate`, `deepspeed`, `diffusers`, `transformers`, `peft`, `safetensors`, `huggingface_hub`, and **editable** DiffSynth-Studio.
-3. `MODEL_DIR` is a complete local `Qwen-Image-Edit-2511` tree (`transformer/`, `text_encoder/`, `vae/`, `tokenizer/`, `processor/`).
-4. `QWEN_VTON_DATA/converted_idm_synth_train_v2/{metadata_train.json,dataset_base}` exists; random metadata paths resolve to real files under `dataset_base`.
-5. `bash -n scripts/train_full_sft_zero3.sh` passes; a **dry preflight** (imports + path checks) succeeds.
-6. You print the exact train command for this machine (GPU count + `DS_PROFILE`) and **do not** start a long training job unless the user explicitly asks.
-
-**Default training target:** full-parameter DiT SFT via ZeRO-3 (`scripts/train_full_sft_zero3.sh`).  
-LoRA (`scripts/train_idm_lora_multigpu.sh`) is optional / lighter.
+给人看的说明见 `docs/REPRODUCE.md`。本文件是**可执行 runbook**。
 
 ---
 
-## 1. Hard rules
+## 0. 目标与完成标准
 
-- Never commit `configs/env.local.sh`, `.env`, tokens, or large weights/data.
-- Never re-synthesize IDM data if HF dataset can be used (`lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling`).
-- Never launch full DiT with plain DDP / `accelerate launch --multi_gpu` without DeepSpeed ZeRO — it will OOM.
-- Always keep `--zero_cond_t` for Qwen-Image-Edit-2511.
-- Training entrypoint is DiffSynth’s  
-  `$DIFFSYNTH_DIR/examples/qwen_image/model_training/train.py`  
-  wrapped by this repo’s shell scripts — do not invent a new `train.py`.
-- If the machine needs HTTP proxy for HF/GitHub, set `http_proxy`/`https_proxy` before downloads.
-- Long jobs: use `tmux`/`screen` or the cluster scheduler; do not leave multi-hour train attached to a flaky SSH session.
-- License: VITON-HD / IDM-VTON derived data are **non-commercial research only** (`NOTICE.md`).
+全部满足才算完成：
+
+1. 仓库已 clone；存在 `configs/env.local.sh`，且脚本经 `scripts/lib_env.sh` 能 source 到它。
+2. `ENV_DIR` 对应的 conda/venv 已安装：`torch`、`accelerate`、`deepspeed`、`diffusers`、`transformers`、`peft`、`safetensors`、`huggingface_hub`，以及 **editable** 安装的 DiffSynth-Studio。
+3. `MODEL_DIR` 是完整的本地 `Qwen-Image-Edit-2511` 目录（含 `transformer/`、`text_encoder/`、`vae/`、`tokenizer/`、`processor/`）。
+4. 存在 `QWEN_VTON_DATA/converted_idm_synth_train_v2/{metadata_train.json,dataset_base}`；metadata 里的路径在 `dataset_base` 下能落到真实文件。
+5. `bash -n scripts/train_full_sft_zero3.sh` 通过；**预检**（import + 路径检查）成功。
+6. 打印适合本机的完整训练命令（含 GPU 数与 `DS_PROFILE`）；**除非用户明确要求，不要启动长时间训练**。
+
+**默认训练目标：** 全参 DiT SFT + ZeRO-3（`scripts/train_full_sft_zero3.sh`）。  
+LoRA（`scripts/train_idm_lora_multigpu.sh`）为可选/轻量路径。
 
 ---
 
-## 2. Ask the user once (if unknown)
+## 1. 硬性规则
 
-Collect before guessing:
+- 禁止提交 `configs/env.local.sh`、`.env`、token、大权重或大数据。
+- 若可用 HF 数据集（`lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling`），禁止重新跑 IDM 合成。
+- 禁止用纯 DDP / 无 DeepSpeed ZeRO 的 `accelerate launch --multi_gpu` 跑全参 DiT——会 OOM。
+- Qwen-Image-Edit-2511 必须始终带 `--zero_cond_t`。
+- 训练入口是 DiffSynth 的  
+  `$DIFFSYNTH_DIR/examples/qwen_image/model_training/train.py`，  
+  由本仓 shell 脚本封装——不要自造新的 `train.py`。
+- 若机器访问 HF/GitHub 需要代理，下载前先设 `http_proxy` / `https_proxy`。
+- 长任务用 `tmux` / `screen` 或集群调度；不要把数小时训练挂在不稳定的 SSH 前台。
+- 许可：VITON-HD / IDM-VTON 衍生数据**仅限非商用研究**（见 `NOTICE.md`）。
 
-| Variable | Why |
+---
+
+## 2. 未知信息先问用户一次
+
+猜之前先收集：
+
+| 变量 | 用途 |
 |---|---|
-| Absolute data disk path (large, fast) | `DATA_ROOT` / `QWEN_VTON_DATA` / `OUTPUT_ROOT` |
-| GPU count × VRAM | Choose `NUM_PROCESSES` + `DS_PROFILE` |
-| HF token (if dataset private) | `HF_TOKEN` |
-| Whether VITON-HD already exists on disk | Skip download; only need path |
-| Proxy host:port (if any) | HF / pip / git |
+| 大数据盘绝对路径（大、快） | `DATA_ROOT` / `QWEN_VTON_DATA` / `OUTPUT_ROOT` |
+| GPU 数量 × 显存 | 决定 `NUM_PROCESSES` + `DS_PROFILE` |
+| HF token（数据集若私有） | `HF_TOKEN` |
+| 本机是否已有 VITON-HD | 有则只需要路径，跳过下载 |
+| 代理 host:port（如有） | HF / pip / git |
 
-If user says “use defaults on this box”, probe with `df -h`, `nvidia-smi -L`, `pwd`, and place bulky data on the largest writable filesystem.
+若用户说「用这台机器默认」，用 `df -h`、`nvidia-smi -L`、`pwd` 探测，把大文件放到最大可写磁盘。
 
 ---
 
-## 3. Phase A — Code and env
+## 3. 阶段 A — 代码与环境
 
 ```bash
 # A1. Clone
@@ -63,17 +63,17 @@ git clone https://github.com/eternity-blog/Qwen-Image-Edit-Outfit-SFT.git
 cd Qwen-Image-Edit-Outfit-SFT
 REPO_ROOT="$PWD"
 
-# A2. Pick paths (EDIT THESE)
-export DATA_ROOT=/CHANGE_ME/qwen_outfit_data          # large disk
+# A2. 选定路径（改这里）
+export DATA_ROOT=/CHANGE_ME/qwen_outfit_data          # 大盘
 export MODEL_DIR=$DATA_ROOT/models/Qwen-Image-Edit-2511
 export DIFFSYNTH_DIR=$DATA_ROOT/modules/DiffSynth-Studio
 export QWEN_VTON_DATA=$DATA_ROOT/datasets/qwen_vton
 export OUTPUT_ROOT=$DATA_ROOT/outputs
-export ENV_DIR=/CHANGE_ME/conda/envs/qwen-image-edit  # or conda env path
+export ENV_DIR=/CHANGE_ME/conda/envs/qwen-image-edit  # 或 conda env 路径
 
 mkdir -p "$DATA_ROOT" "$MODEL_DIR" "$DIFFSYNTH_DIR" "$QWEN_VTON_DATA" "$OUTPUT_ROOT"
 
-# A3. Write env.local.sh (gitignored)
+# A3. 写 env.local.sh（已被 gitignore）
 cp configs/env.example.sh configs/env.local.sh
 cat > configs/env.local.sh <<EOF
 export DATA_ROOT=$DATA_ROOT
@@ -84,21 +84,21 @@ export OUTPUT_ROOT=$OUTPUT_ROOT
 export ENV_DIR=$ENV_DIR
 EOF
 
-# A4. Python env (conda example)
+# A4. Python 环境（conda 示例）
 # conda create -p "$ENV_DIR" python=3.11 -y
 # conda activate "$ENV_DIR"
 "$ENV_DIR/bin/python" -m pip install -U pip
 "$ENV_DIR/bin/python" -m pip install -r requirements.txt
 "$ENV_DIR/bin/python" -m pip install deepspeed
 
-# A5. DiffSynth-Studio (required; train.py lives here)
+# A5. DiffSynth-Studio（必需；train.py 在这里）
 if [[ ! -f "$DIFFSYNTH_DIR/examples/qwen_image/model_training/train.py" ]]; then
   git clone https://github.com/modelscope/DiffSynth-Studio.git "$DIFFSYNTH_DIR"
 fi
 "$ENV_DIR/bin/python" -m pip install -e "$DIFFSYNTH_DIR"
 ```
 
-### Verify A
+### 校验 A
 
 ```bash
 source configs/env.local.sh
@@ -114,11 +114,11 @@ test -f configs/accelerate_zero3.yaml
 
 ---
 
-## 4. Phase B — Base model
+## 4. 阶段 B — 底座模型
 
-Download **Qwen/Qwen-Image-Edit-2511** into `MODEL_DIR` (HF CLI or `huggingface_hub.snapshot_download`). Offline mirrors OK if complete.
+把 **Qwen/Qwen-Image-Edit-2511** 下到 `MODEL_DIR`（HF CLI 或 `huggingface_hub.snapshot_download`）。离线镜像可以，但目录必须完整。
 
-### Verify B
+### 校验 B
 
 ```bash
 source configs/env.local.sh
@@ -135,7 +135,7 @@ assert all(need), need
 assert (md/"tokenizer").exists() or True
 print("model ok", md)
 PY
-# Prefer:
+# 推荐再看一眼：
 ls "$MODEL_DIR/transformer"/diffusion_pytorch_model*.safetensors | head
 ls "$MODEL_DIR/text_encoder"/model*.safetensors | head
 ls "$MODEL_DIR/vae"/diffusion_pytorch_model*.safetensors | head
@@ -143,43 +143,43 @@ ls "$MODEL_DIR/vae"/diffusion_pytorch_model*.safetensors | head
 
 ---
 
-## 5. Phase C — Dataset
+## 5. 阶段 C — 数据
 
-### C1. VITON-HD (user-provided, CC BY-NC)
+### C1. VITON-HD（用户自备，CC BY-NC）
 
-Place (or symlink) so that these exist:
+放置或软链，保证存在：
 
 ```text
 $QWEN_VTON_DATA/raw/viton_hd/train/image/
 $QWEN_VTON_DATA/raw/viton_hd/train/cloth/
-# test/ optional but recommended
+# test/ 建议也有
 ```
 
-**Do not** scrape illegally. If missing, stop and ask the user for the path.
+**禁止**非法爬取。若缺失，停下来向用户要路径。
 
-### C2. Synthetic pairs from Hugging Face
+### C2. 从 Hugging Face 拉合成 pair
 
 ```bash
 source configs/env.local.sh
-export HF_TOKEN="${HF_TOKEN:-}"   # if needed
-# Default repo is baked into the script:
+export HF_TOKEN="${HF_TOKEN:-}"   # 需要时再设
+# 脚本内默认仓库：
 #   lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling
 bash scripts/prepare_data_from_hf.sh
 ```
 
-This will:
+脚本会：
 
-1. Download HF dataset → `$QWEN_VTON_DATA/from_hf`
-2. Flatten `images/part-*` → `synth/*/images/` via symlinks
-3. Run `run_convert_idm_v2.sh` → full Outfit v2 prompts + `dataset_base` symlinks
+1. 下载 HF 数据集 → `$QWEN_VTON_DATA/from_hf`
+2. 把 `images/part-*` 扁平化为 `synth/*/images/`（symlink）
+3. 跑 `run_convert_idm_v2.sh` → 全文 Outfit v2 prompt + `dataset_base` 软链
 
-If VITON was missing when the script ran, fix VITON then:
+若当时还没有 VITON，先补上再执行：
 
 ```bash
 bash scripts/run_convert_idm_v2.sh
 ```
 
-### Verify C (mandatory)
+### 校验 C（必须）
 
 ```bash
 source configs/env.local.sh
@@ -200,45 +200,45 @@ print("dataset_base", db.resolve())
 PY
 ```
 
-Expected ballpark: ~11415 train rows; prompt length ~1592 chars (full v2).
+量级预期：约 11415 条 train；prompt 约 1592 字符（全文 v2）。
 
 ---
 
-## 6. Phase D — Training profile selection
+## 6. 阶段 D — 选择训练配置
 
 ```bash
 nvidia-smi -L
 nvidia-smi --query-gpu=index,memory.total,memory.free --format=csv
 ```
 
-| GPUs (80GB class) | Export |
+| GPU（约 80GB 级） | 导出变量 |
 |---|---|
 | ≥8 | `NUM_PROCESSES=8` `DS_PROFILE=zero3` |
 | 4 | `NUM_PROCESSES=4` `DS_PROFILE=zero2_offload` |
-| &lt;4 | Prefer LoRA script instead of full SFT |
+| &lt;4 | 优先走 LoRA 脚本，不要硬上全参 |
 
-Optional warm start from a LoRA-fused tree:
+可选：从 LoRA fuse 后的目录热启动：
 
 ```bash
 export INIT_MODEL_DIR=/path/to/qwen_idm_lora_fused
 ```
 
-Default: `INIT_MODEL_DIR=$MODEL_DIR`.
+默认：`INIT_MODEL_DIR=$MODEL_DIR`。
 
 ---
 
-## 7. Phase E — Preflight (do this before real train)
+## 7. 阶段 E — 预检（真开训前必做）
 
 ```bash
 source configs/env.local.sh
 export METADATA=$QWEN_VTON_DATA/converted_idm_synth_train_v2/metadata_train.json
 export DATASET_BASE=$QWEN_VTON_DATA/converted_idm_synth_train_v2/dataset_base
-export NUM_PROCESSES=8          # adjust
-export DS_PROFILE=zero3         # or zero2_offload
+export NUM_PROCESSES=8          # 按机器改
+export DS_PROFILE=zero3         # 或 zero2_offload
 export LR=1e-5
 export NUM_EPOCHS=1
 
-# Syntax + dependency checks inside the train script’s early exits:
+# 语法 + 训练脚本开头会检查的依赖：
 bash -n scripts/train_full_sft_zero3.sh
 "$ENV_DIR/bin/python" -c "import deepspeed,accelerate; print('ok')"
 test -f "$METADATA"
@@ -246,11 +246,11 @@ test -d "$DATASET_BASE"
 test -d "$DIFFSYNTH_DIR/examples/qwen_image/model_training"
 ```
 
-**Do not** start full training in preflight unless asked.
+预检阶段**不要**开全量训练，除非用户要求。
 
 ---
 
-## 8. Phase F — Start training (only when user asks)
+## 8. 阶段 F — 启动训练（仅当用户明确要求）
 
 ```bash
 source configs/env.local.sh
@@ -261,17 +261,17 @@ export DS_PROFILE=zero3
 export LR=1e-5
 export NUM_EPOCHS=1
 
-# Recommended: tmux
+# 推荐 tmux
 tmux new -d -s qwen_full_sft \
   "cd $REPO_ROOT && bash scripts/train_full_sft_zero3.sh 2>&1 | tee $OUTPUT_ROOT/qwen_vton_full_sft_launch.log"
 ```
 
-Artifacts:
+产物：
 
-- Log: `$OUTPUT_ROOT/qwen_vton_full_sft/logs/train_full_sft.log`
-- DiT ckpt: `$OUTPUT_ROOT/qwen_vton_full_sft/dit_full/epoch-*.safetensors`
+- 日志：`$OUTPUT_ROOT/qwen_vton_full_sft/logs/train_full_sft.log`
+- DiT ckpt：`$OUTPUT_ROOT/qwen_vton_full_sft/dit_full/epoch-*.safetensors`
 
-After train completes:
+训练结束后：
 
 ```bash
 "$ENV_DIR/bin/python" scripts/apply_full_dit_ckpt.py \
@@ -280,7 +280,7 @@ After train completes:
   --out-dir "$OUTPUT_ROOT/qwen_full_sft_fused"
 ```
 
-### LoRA alternative
+### LoRA 备选
 
 ```bash
 export METADATA=$QWEN_VTON_DATA/converted_idm_synth_train_v2/metadata_train.json
@@ -291,7 +291,7 @@ bash scripts/train_idm_lora_multigpu.sh
 
 ---
 
-## 9. Final report template (print to user)
+## 9. 完成后向用户汇报（模板）
 
 ```text
 ENV READY
@@ -316,45 +316,45 @@ START FULL SFT WITH:
 
 ---
 
-## 10. Failure cheat sheet
+## 10. 故障速查
 
-| Symptom | Fix |
+| 现象 | 处理 |
 |---|---|
-| `ModuleNotFoundError: deepspeed` | `pip install deepspeed` into `ENV_DIR` |
-| OOM on full SFT | `DS_PROFILE=zero2_offload`, fewer pixels, or LoRA |
-| `missing dataset_base` / FileNotFound in loader | Re-run `prepare_data_from_hf.sh` / `run_convert_idm_v2.sh`; confirm VITON path |
-| HF images only under `part-*` | Always use `prepare_data_from_hf.sh` (flattens) |
-| `train.py` not found | Clone DiffSynth to `DIFFSYNTH_DIR` |
-| Accidental DDP full train | Stop; use `train_full_sft_zero3.sh` only |
-| Proxy / HF 403 | Set proxy + `HF_TOKEN` |
-| epoch ckpt not loadable as MODEL_DIR | Run `apply_full_dit_ckpt.py` |
+| `ModuleNotFoundError: deepspeed` | 在 `ENV_DIR` 里 `pip install deepspeed` |
+| 全参 OOM | `DS_PROFILE=zero2_offload`、降低分辨率，或改 LoRA |
+| `missing dataset_base` / loader FileNotFound | 重跑 `prepare_data_from_hf.sh` / `run_convert_idm_v2.sh`；检查 VITON 路径 |
+| HF 图只在 `part-*` 下 | 必须用 `prepare_data_from_hf.sh`（会扁平化） |
+| 找不到 `train.py` | 把 DiffSynth clone 到 `DIFFSYNTH_DIR` |
+| 误用 DDP 跑全参 | 立刻停；只用 `train_full_sft_zero3.sh` |
+| 代理 / HF 403 | 设代理 + `HF_TOKEN` |
+| epoch ckpt 不能当 MODEL_DIR 用 | 跑 `apply_full_dit_ckpt.py` |
 
 ---
 
-## 11. Key file map
+## 11. 关键文件
 
-| Path | Role |
+| 路径 | 作用 |
 |---|---|
-| `scripts/lib_env.sh` | Loads `configs/env.local.sh` |
-| `scripts/prepare_data_from_hf.sh` | HF download + flatten + v2 convert |
-| `scripts/run_convert_idm_v2.sh` | Full v2 metadata only |
-| `scripts/train_full_sft_zero3.sh` | Full DiT + Accelerate DeepSpeed |
+| `scripts/lib_env.sh` | 加载 `configs/env.local.sh` |
+| `scripts/prepare_data_from_hf.sh` | 下 HF + 扁平化 + v2 转换 |
+| `scripts/run_convert_idm_v2.sh` | 只重建全文 v2 metadata |
+| `scripts/train_full_sft_zero3.sh` | 全参 DiT + Accelerate DeepSpeed |
 | `scripts/train_idm_lora_multigpu.sh` | LoRA DDP |
-| `scripts/apply_full_dit_ckpt.py` | DiT ckpt → full model dir |
-| `configs/accelerate_zero3.yaml` | ZeRO-3 template |
+| `scripts/apply_full_dit_ckpt.py` | DiT ckpt → 完整模型目录 |
+| `configs/accelerate_zero3.yaml` | ZeRO-3 模板 |
 | `configs/accelerate_zero2_offload.yaml` | ZeRO-2 + CPU offload |
-| `prompts/outfit_v2.py` | Live garment-only prompt template |
-| `docs/REPRODUCE.md` | Human reproduce guide |
-| `docs/TRAINING.md` | Training notes |
-| `docs/KNOWLEDGE.md` | Model / ZeRO / prompt knowledge |
+| `prompts/outfit_v2.py` | 线上 garment-only 提示词模板 |
+| `docs/REPRODUCE.md` | 人读复现指南 |
+| `docs/TRAINING.md` | 训练说明 |
+| `docs/KNOWLEDGE.md` | 模型 / ZeRO / prompt 知识 |
 
 ---
 
-## 12. Out of scope (unless user asks)
+## 12. 默认不做（除非用户要求）
 
-- Re-running IDM-VTON teacher synthesis from scratch  
-- Multi-reference product views  
-- Business TestSet / case02 assets (not in this git repo)  
-- Changing license to commercial  
+- 从头重跑 IDM-VTON teacher 合成  
+- 多参考商品图增强  
+- 业务 TestSet / case02 资产（不在本 git 仓）  
+- 改成可商用许可  
 
-End of runbook.
+手册结束。
