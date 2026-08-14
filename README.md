@@ -7,13 +7,14 @@
 ## 功能
 
 - **数据**：VITON-HD + IDM-VTON teacher 合成 unpaired 换装 pair，导出 DiffSynth metadata（全文 v2 prompt）
-- **训练**：DiffSynth DiT-LoRA（`zero_cond_t`）；全参 ZeRO-3 配置草案见 `docs/TRAINING.md`
+- **训练**：DiffSynth DiT-LoRA（`zero_cond_t`）；多卡全参 ZeRO-3（`scripts/train_full_sft_zero3.sh`）
 - **评测**：与 GPT / base 对照的关键帧拼图评测
-- **发布**：合成数据可上传至 Hugging Face Dataset
+- **发布**：合成数据已上传 Hugging Face Dataset
 
 数据集：[lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling](https://huggingface.co/datasets/lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling)（IDM synth train/test + v2 metadata；NC 衍生许可）
 
-相关原理与模型知识见 [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md)。任务背景见 [docs/BACKGROUND.md](docs/BACKGROUND.md)。
+**从零复现（含全参）：** [docs/REPRODUCE.md](docs/REPRODUCE.md)。  
+相关原理见 [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md)；任务背景见 [docs/BACKGROUND.md](docs/BACKGROUND.md)。
 
 ## 仓库结构
 
@@ -46,12 +47,11 @@ cp configs/env.example.sh configs/env.local.sh   # 填写 MODEL_DIR / DATA 等
 pip install -r requirements.txt
 # DiffSynth、底座权重：见 docs/REPRODUCE.md
 
-bash scripts/run_convert_idm_v2.sh          # 全文 v2 metadata
-bash scripts/train_idm_lora_multigpu.sh     # 多卡 LoRA
+bash scripts/prepare_data_from_hf.sh        # 或本地合成后 run_convert_idm_v2.sh
+bash scripts/train_idm_lora_multigpu.sh     # 多卡 LoRA（可选）
+bash scripts/train_full_sft_zero3.sh        # 全参 ZeRO-3（建议 8×80GB）
+python scripts/apply_full_dit_ckpt.py --help
 bash scripts/run_case02_v2_prompt_eval.sh   # 评测
-
-# 可选：上传合成数据
-python scripts/upload_all_synth_to_hf.py --help
 ```
 
 ## 文档

@@ -74,14 +74,16 @@ python scripts/upload_dataset_to_hf.py \
 
 ### 3.3 别人怎么用你的数据
 
-```text
-1. huggingface-cli download <repo-id> --local-dir ./hf_data
-2. 自行准备 viton_hd 到 raw/
-3. 按 converted 的 dataset_base 建 symlink
-4. bash scripts/train_idm_lora_multigpu.sh
+```bash
+# 已发布默认 repo：lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling
+# 1) 自行准备 viton_hd → $QWEN_VTON_DATA/raw/viton_hd
+# 2) 一键下载 HF + 扁平化 part-* + 重建 v2 metadata
+bash scripts/prepare_data_from_hf.sh
+# 3) 训练
+bash scripts/train_full_sft_zero3.sh   # 或 train_idm_lora_multigpu.sh
 ```
 
-在本仓 README 填上你的 `repo-id` 链接即可闭环。
+完整步骤见 [REPRODUCE.md](REPRODUCE.md)。
 
 ---
 

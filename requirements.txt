@@ -4,6 +4,7 @@ torchvision
 diffusers>=0.32.0
 transformers>=4.45.0
 accelerate
+deepspeed
 safetensors
 pillow
 numpy
@@ -11,6 +12,7 @@ opencv-python-headless
 sentencepiece
 protobuf
 peft
+huggingface_hub
 
 # Optional teacher / tooling
 # install DiffSynth-Studio editable from git when training:

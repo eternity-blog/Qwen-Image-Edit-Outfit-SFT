@@ -1,13 +1,13 @@
 # 训练：LoRA SFT 与多卡全参 ZeRO-3
 
-操作清单见 [REPRODUCE.md](REPRODUCE.md)；原理见 [KNOWLEDGE.md](KNOWLEDGE.md)。
+完整逐步清单见 [REPRODUCE.md](REPRODUCE.md)；原理见 [KNOWLEDGE.md](KNOWLEDGE.md)。
 
 ---
 
-## 1. LoRA SFT（本仓已有脚本）
+## 1. LoRA SFT
 
 ```bash
-source configs/env.local.sh   # 或依赖 scripts/lib_env.sh
+source configs/env.local.sh
 export METADATA=$QWEN_VTON_DATA/converted_idm_synth_train_v2/metadata_train.json
 export DATASET_BASE=$QWEN_VTON_DATA/converted_idm_synth_train_v2/dataset_base
 bash scripts/train_idm_lora_multigpu.sh
@@ -40,41 +40,51 @@ bash scripts/train_idm_lora_multigpu.sh
 ≈ 280+ GiB   ← 一张 80GB 卡不可能；4 卡 DDP 也只是 4 份复制
 ```
 
-ZeRO-3 把 **参数、梯度、优化器** 切到 N 卡。建议 **≥8×80GB** 先不开 offload；不够再 `optimizer/param` CPU offload。
+ZeRO-3 把 **参数、梯度、优化器** 切到 N 卡。建议 **≥8×80GB** 先不开 offload；不够再用 ZeRO-2 + CPU offload。
 
-### 2.2 推荐第一枪设定
+### 2.2 启动（本仓脚本）
 
-- 可训：**仅 DiT**；TE/VAE 冻结（或预计算 embed/latent，进阶优化）  
-- LR：比 LoRA 低（如 1e-5～5e-5）  
+对齐 DiffSynth 官方 `examples/qwen_image/model_training/full/Qwen-Image-Edit-2511.sh`：  
+**Accelerate + DeepSpeed config**，`--trainable_models dit`，`--zero_cond_t`。
+
+```bash
+export NUM_PROCESSES=8
+export DS_PROFILE=zero3          # 或 zero2_offload
+export LR=1e-5
+export NUM_EPOCHS=1
+# export INIT_MODEL_DIR=...      # 默认 MODEL_DIR；可改为 LoRA fused
+bash scripts/train_full_sft_zero3.sh
+```
+
+配置模板：
+
+- `configs/accelerate_zero3.yaml`
+- `configs/accelerate_zero2_offload.yaml`
+
+脚本会按 `NUM_PROCESSES` 生成实际 yaml 到 `$OUTPUT_ROOT/qwen_vton_full_sft/`。
+
+### 2.3 推荐设定
+
+- 可训：**仅 DiT**；TE/VAE 冻结  
+- LR：1e-5～5e-5（低于 LoRA）  
 - 数据：同一套全文 v2 metadata  
 - GC：开  
 - 初始化：底座或 LoRA fuse 后权重  
 
-示例配置：`configs/ds_zero3_bf16_example.json`。
-
-### 2.3 待实现脚本
-
-- [ ] `scripts/train_full_sft_zero3.sh`  
-- [ ] 确认当前 DiffSynth 的 `--trainable_models dit`（无 LoRA）启动方式  
-- [ ] ZeRO-3 ckpt 汇总为可 `diffusers` 加载的流程文档  
-
-伪代码层面：
+### 2.4 导出完整模型
 
 ```bash
-deepspeed --num_gpus 8 train.py \
-  --trainable_models dit \
-  --learning_rate 2e-5 \
-  --use_gradient_checkpointing \
-  --zero_cond_t \
-  --deepspeed_config configs/ds_zero3_bf16_example.json \
-  ...
+python scripts/apply_full_dit_ckpt.py \
+  --base-model "$MODEL_DIR" \
+  --ckpt "$OUTPUT_ROOT/qwen_vton_full_sft/dit_full/epoch-0.safetensors" \
+  --out-dir "$OUTPUT_ROOT/qwen_full_sft_fused"
 ```
 
-### 2.4 注意点
+### 2.5 注意点
 
-1. DDP 与 ZeRO-3 适用场景不同  
-2. 全参显存需按参数量估算后再选卡数  
-3. GC 与 ZeRO-3 叠加会增加通信，但仍常优于存全量激活  
+1. 不要用纯 DDP 跑全参 DiT  
+2. GC 与 ZeRO-3 叠加会增加通信，但通常仍优于存满激活  
+3. `zero3_save_16bit_model: true` 便于汇总 16-bit 权重；最终评测仍建议走 `apply_full_dit_ckpt.py`
 
 ---
 
@@ -85,5 +95,3 @@ pip install -r requirements.txt
 pip install -e $DIFFSYNTH_DIR
 pip install deepspeed   # 全参
 ```
-
-`scripts/setup_env.sh` 可作集群装环境参考（路径请用 env.local 覆盖）。
