@@ -53,14 +53,17 @@ pip install -e "$DIFFSYNTH_DIR"
 
 ## 2. 数据
 
-### 2.1 推荐：HF 合成数据 + 自备 VITON
+### 2.1 推荐：一条命令从公开 HF 拉齐
 
 ```bash
-# 1) 自行下载 VITON-HD → $QWEN_VTON_DATA/raw/viton_hd/{train,test}/...
-# 2) 拉 HF 并接好 symlink + 重建全文 v2 metadata
-export HF_TOKEN=...   # 若仓库为 private
+# 自动下载：合成集 + VITON-HD + 重建全文 v2 metadata
 bash scripts/prepare_data_from_hf.sh
 ```
+
+公开来源：
+
+- 合成：`lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling`
+- VITON-HD：`skush1/viton-hd`（CC BY-NC）
 
 完成后应有：
 

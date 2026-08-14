@@ -75,11 +75,9 @@ python scripts/upload_dataset_to_hf.py \
 ### 3.3 别人怎么用你的数据
 
 ```bash
-# 已发布默认 repo：lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling
-# 1) 自行准备 viton_hd → $QWEN_VTON_DATA/raw/viton_hd
-# 2) 一键下载 HF + 扁平化 part-* + 重建 v2 metadata
+# 公开 HF：合成集 + VITON-HD，一条命令接好训练目录
 bash scripts/prepare_data_from_hf.sh
-# 3) 训练
+# 训练
 bash scripts/train_full_sft_zero3.sh   # 或 train_idm_lora_multigpu.sh
 ```
 

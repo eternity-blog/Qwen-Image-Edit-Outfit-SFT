@@ -27,7 +27,8 @@ LoRA（`scripts/train_idm_lora_multigpu.sh`）为可选/轻量路径。
 ## 1. 硬性规则
 
 - 禁止提交 `configs/env.local.sh`、`.env`、token、大权重或大数据。
-- 若可用 HF 数据集（`lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling`），禁止重新跑 IDM 合成。
+- 训练数据与底座均可从**公开 HF**自动下载（见阶段 C / B）；禁止向用户索要「数据集路径」或数据包。  
+- 若可用 HF 合成集，禁止重新跑 IDM teacher 合成。
 - 禁止用纯 DDP / 无 DeepSpeed ZeRO 的 `accelerate launch --multi_gpu` 跑全参 DiT——会 OOM。
 - Qwen-Image-Edit-2511 必须始终带 `--zero_cond_t`。
 - 训练入口是 DiffSynth 的  
@@ -39,19 +40,33 @@ LoRA（`scripts/train_idm_lora_multigpu.sh`）为可选/轻量路径。
 
 ---
 
-## 2. 未知信息先问用户一次
+## 2. 只需问用户一次的信息（数据不用问）
 
-猜之前先收集：
+**数据集全部公开，Agent 自行从 HF 下载，不要向用户要数据盘/数据包。**
+
+| 公开资源 | HF / 来源 |
+|---|---|
+| 合成换装 pair + v2 metadata | `lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling` |
+| VITON-HD 原图（CC BY-NC） | `skush1/viton-hd`（`zalando-hd-resized.zip`） |
+| 底座模型 | `Qwen/Qwen-Image-Edit-2511` |
+| 训练框架 | DiffSynth-Studio（GitHub） |
+
+一条命令拉齐训练数据（脚本内已含 VITON + synth）：
+
+```bash
+bash scripts/prepare_data_from_hf.sh
+```
+
+仍需确认的**机器侧**信息（与数据集无关）：
 
 | 变量 | 用途 |
 |---|---|
-| 大数据盘绝对路径（大、快） | `DATA_ROOT` / `QWEN_VTON_DATA` / `OUTPUT_ROOT` |
+| 大盘绝对路径（可写、够空间） | `DATA_ROOT` / `OUTPUT_ROOT` 等落盘位置 |
 | GPU 数量 × 显存 | 决定 `NUM_PROCESSES` + `DS_PROFILE` |
-| HF token（数据集若私有） | `HF_TOKEN` |
-| 本机是否已有 VITON-HD | 有则只需要路径，跳过下载 |
-| 代理 host:port（如有） | HF / pip / git |
+| 代理 host:port（如有） | 出网下 HF / pip / git |
+| `HF_TOKEN`（一般不需要） | 仅限流/鉴权失败时 |
 
-若用户说「用这台机器默认」，用 `df -h`、`nvidia-smi -L`、`pwd` 探测，把大文件放到最大可写磁盘。
+若用户说「用这台机器默认」，用 `df -h`、`nvidia-smi -L`、`pwd` 探测路径即可，**不要**再问「数据集在哪」。
 
 ---
 
@@ -143,41 +158,24 @@ ls "$MODEL_DIR/vae"/diffusion_pytorch_model*.safetensors | head
 
 ---
 
-## 5. 阶段 C — 数据
+## 5. 阶段 C — 数据（全自动，公开 HF）
 
-### C1. VITON-HD（用户自备，CC BY-NC）
-
-放置或软链，保证存在：
-
-```text
-$QWEN_VTON_DATA/raw/viton_hd/train/image/
-$QWEN_VTON_DATA/raw/viton_hd/train/cloth/
-# test/ 建议也有
-```
-
-**禁止**非法爬取。若缺失，停下来向用户要路径。
-
-### C2. 从 Hugging Face 拉合成 pair
+**不要向用户索要数据集。** 直接：
 
 ```bash
 source configs/env.local.sh
-export HF_TOKEN="${HF_TOKEN:-}"   # 需要时再设
-# 脚本内默认仓库：
-#   lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling
+# 一般无需 HF_TOKEN（公开仓库）
 bash scripts/prepare_data_from_hf.sh
 ```
 
-脚本会：
+脚本会自动：
 
-1. 下载 HF 数据集 → `$QWEN_VTON_DATA/from_hf`
-2. 把 `images/part-*` 扁平化为 `synth/*/images/`（symlink）
-3. 跑 `run_convert_idm_v2.sh` → 全文 Outfit v2 prompt + `dataset_base` 软链
+1. 下载合成集 `lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling`
+2. 下载并解压 VITON-HD `skush1/viton-hd` → `$QWEN_VTON_DATA/raw/viton_hd`
+3. 将 `images/part-*` 扁平化为 `synth/*/images/`（symlink）
+4. 跑 `run_convert_idm_v2.sh` → 全文 Outfit v2 prompt + `dataset_base`
 
-若当时还没有 VITON，先补上再执行：
-
-```bash
-bash scripts/run_convert_idm_v2.sh
-```
+许可提醒（写入 NOTICE 即可，不必拦流程）：VITON CC BY-NC，合成数据为衍生，**研究/非商用**。
 
 ### 校验 C（必须）
 
@@ -326,7 +324,7 @@ START FULL SFT WITH:
 | HF 图只在 `part-*` 下 | 必须用 `prepare_data_from_hf.sh`（会扁平化） |
 | 找不到 `train.py` | 把 DiffSynth clone 到 `DIFFSYNTH_DIR` |
 | 误用 DDP 跑全参 | 立刻停；只用 `train_full_sft_zero3.sh` |
-| 代理 / HF 403 | 设代理 + `HF_TOKEN` |
+| 代理 / HF 下载失败 | 设 `http_proxy`/`https_proxy`；仅限流时再设 `HF_TOKEN` |
 | epoch ckpt 不能当 MODEL_DIR 用 | 跑 `apply_full_dit_ckpt.py` |
 
 ---
