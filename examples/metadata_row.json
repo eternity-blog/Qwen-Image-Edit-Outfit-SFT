@@ -1,0 +1,11 @@
+{
+  "image": "idm_synth/personA__clothB.jpg",
+  "edit_image": [
+    "viton_hd/train/image/personA.jpg",
+    "viton_hd/train/cloth/clothB.jpg"
+  ],
+  "prompt": "<full outfit_garment_only v2 text — see docs/PROMPT_V2.md>",
+  "source": "idm_vton_synth_v2prompt",
+  "prompt_style": "outfit_garment_only_v2_full",
+  "n_product_refs": 1
+}

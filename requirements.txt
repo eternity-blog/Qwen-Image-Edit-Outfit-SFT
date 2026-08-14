@@ -1,0 +1,18 @@
+# Core
+torch>=2.4.0
+torchvision
+diffusers>=0.32.0
+transformers>=4.45.0
+accelerate
+safetensors
+pillow
+numpy
+opencv-python-headless
+sentencepiece
+protobuf
+peft
+
+# Optional teacher / tooling
+# install DiffSynth-Studio editable from git when training:
+#   pip install -e $DIFFSYNTH_DIR
+# IDM-VTON has its own env — see docs/DATA.md

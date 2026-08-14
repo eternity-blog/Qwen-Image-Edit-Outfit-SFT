@@ -1,0 +1,45 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local env overrides
+configs/env.local.sh
+.env
+.env.*
+
+# Virtualenvs
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Large / licensed data (never commit)
+data/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.zip
+*.tar
+*.tar.gz
+
+# Run outputs (keep directory via .gitkeep)
+outputs/**
+!outputs/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# Mutagen / sync junk
+*.conflict
+*.tmp
