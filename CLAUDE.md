@@ -1,8 +1,11 @@
 # CLAUDE.md — 本仓库 Agent 环境重建手册
 
-**读者：** 在一台**全新多卡 Linux 机器**上工作的 Claude Code（或其它编码 Agent）。  
-**任务：** 把完整实验栈重建好，让人可以用一条脚本启动训练。  
-**禁止**重新设计训练链路。优先使用本仓 `scripts/` 与 `docs/` 里已有内容。
+**前置条件（已由用户完成）：** 用户已 `git clone` 本仓库，并在仓库根目录打开 Claude Code / 让你读本文件。  
+**你当前工作目录就是仓库根**（存在 `CLAUDE.md`、`scripts/`、`configs/`）。**不要再 clone 本仓。**
+
+**读者：** 在一台**多卡 Linux 机器**上工作的 Claude Code（或其它编码 Agent）。  
+**任务：** 在本仓基础上装好依赖、拉齐公开数据与底座，使人可以一条脚本开训。  
+**禁止**重新设计训练链路。优先使用本仓 `scripts/` 与 `docs/`。
 
 给人看的说明见 `docs/REPRODUCE.md`。本文件是**可执行 runbook**。
 
@@ -12,7 +15,7 @@
 
 全部满足才算完成：
 
-1. 仓库已 clone；存在 `configs/env.local.sh`，且脚本经 `scripts/lib_env.sh` 能 source 到它。
+1. 确认已在本仓根目录（`test -f CLAUDE.md && test -d scripts`）；存在 `configs/env.local.sh`，且经 `scripts/lib_env.sh` 可 source。
 2. `ENV_DIR` 对应的 conda/venv 已安装：`torch`、`accelerate`、`deepspeed`、`diffusers`、`transformers`、`peft`、`safetensors`、`huggingface_hub`，以及 **editable** 安装的 DiffSynth-Studio。
 3. `MODEL_DIR` 是完整的本地 `Qwen-Image-Edit-2511` 目录（含 `transformer/`、`text_encoder/`、`vae/`、`tokenizer/`、`processor/`）。
 4. 存在 `QWEN_VTON_DATA/converted_idm_synth_train_v2/{metadata_train.json,dataset_base}`；metadata 里的路径在 `dataset_base` 下能落到真实文件。
@@ -26,6 +29,7 @@ LoRA（`scripts/train_idm_lora_multigpu.sh`）为可选/轻量路径。
 
 ## 1. 硬性规则
 
+- 禁止再 `git clone` 本仓库；工作目录必须已是本仓根。DiffSynth 依赖仓除外。
 - 禁止提交 `configs/env.local.sh`、`.env`、token、大权重或大数据。
 - 训练数据与底座均可从**公开 HF**自动下载（见阶段 C / B）；禁止向用户索要「数据集路径」或数据包。  
 - 若可用 HF 合成集，禁止重新跑 IDM teacher 合成。
@@ -70,15 +74,14 @@ bash scripts/prepare_data_from_hf.sh
 
 ---
 
-## 3. 阶段 A — 代码与环境
+## 3. 阶段 A — 环境（仓库已在本地）
 
 ```bash
-# A1. Clone
-git clone https://github.com/eternity-blog/Qwen-Image-Edit-Outfit-SFT.git
-cd Qwen-Image-Edit-Outfit-SFT
+# A0. 确认在本仓根目录（用户已 clone，禁止再 git clone 本仓）
+test -f CLAUDE.md && test -d scripts && test -f scripts/train_full_sft_zero3.sh
 REPO_ROOT="$PWD"
 
-# A2. 选定路径（改这里）
+# A1. 选定路径（改这里；大权重/数据不要放进 git 工作树）
 export DATA_ROOT=/CHANGE_ME/qwen_outfit_data          # 大盘
 export MODEL_DIR=$DATA_ROOT/models/Qwen-Image-Edit-2511
 export DIFFSYNTH_DIR=$DATA_ROOT/modules/DiffSynth-Studio
@@ -88,7 +91,7 @@ export ENV_DIR=/CHANGE_ME/conda/envs/qwen-image-edit  # 或 conda env 路径
 
 mkdir -p "$DATA_ROOT" "$MODEL_DIR" "$DIFFSYNTH_DIR" "$QWEN_VTON_DATA" "$OUTPUT_ROOT"
 
-# A3. 写 env.local.sh（已被 gitignore）
+# A2. 写 env.local.sh（已被 gitignore）
 cp configs/env.example.sh configs/env.local.sh
 cat > configs/env.local.sh <<EOF
 export DATA_ROOT=$DATA_ROOT
@@ -99,14 +102,14 @@ export OUTPUT_ROOT=$OUTPUT_ROOT
 export ENV_DIR=$ENV_DIR
 EOF
 
-# A4. Python 环境（conda 示例）
+# A3. Python 环境（conda 示例）
 # conda create -p "$ENV_DIR" python=3.11 -y
 # conda activate "$ENV_DIR"
 "$ENV_DIR/bin/python" -m pip install -U pip
 "$ENV_DIR/bin/python" -m pip install -r requirements.txt
 "$ENV_DIR/bin/python" -m pip install deepspeed
 
-# A5. DiffSynth-Studio（必需；train.py 在这里）
+# A4. DiffSynth-Studio（必需；train.py 在这里——这是唯一允许另 clone 的依赖仓）
 if [[ ! -f "$DIFFSYNTH_DIR/examples/qwen_image/model_training/train.py" ]]; then
   git clone https://github.com/modelscope/DiffSynth-Studio.git "$DIFFSYNTH_DIR"
 fi
