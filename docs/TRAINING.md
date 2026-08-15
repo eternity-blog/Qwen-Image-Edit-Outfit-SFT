@@ -88,7 +88,47 @@ python scripts/apply_full_dit_ckpt.py \
 
 ---
 
-## 3. 环境依赖
+## 3. 对照实验：同数据 LoRA（`train_lora_v2_multigpu.sh`）
+
+**为什么需要它：** 早先那版 LoRA（`train_idm_lora_multigpu.sh`）训的是 v1 metadata
+（2 条英文短指令、76–223 字符），而全参 SFT 用的是 v2（1 条 1592 字符中文模板）。
+评测统一用 live v2 prompt，等于只把 LoRA 放在了分布之外，因此那组数据**无法回答
+「LoRA vs 全参」**。详见 [EVAL_RESULTS_20260815.md](EVAL_RESULTS_20260815.md) 第 3 节。
+
+`scripts/train_lora_v2_multigpu.sh` 把数据固定成与全参完全相同的 v2，只留「训练方式」一个变量。
+
+| 保持一致 | 值 |
+|---|---|
+| metadata / dataset_base | `converted_idm_synth_train_v2`（同一批文件） |
+| epochs / dataset_repeat | 1 / 1 |
+| max_pixels | 1048576 |
+| gradient checkpointing | 开 |
+| `zero_cond_t` | 开 |
+| 精度 | bf16 |
+| **NUM_PROCESSES** | **8** → 有效 batch 8，**optimizer 步数同为 1427** |
+
+| 必然不同（方法本身决定，结论里要注明） | LoRA | 全参 |
+|---|---|---|
+| 可训参数 | DiT LoRA r16（约 0.118B） | 全部 DiT（20.43B） |
+| 学习率 | 1e-4 | 1e-5 |
+| 分布式 | DDP | DeepSpeed ZeRO-3 |
+
+```bash
+source configs/env.local.sh
+bash scripts/train_lora_v2_multigpu.sh      # 约 3–4h @ 8×H100，含 fuse
+```
+
+脚本启动前会打印 `samples / prompt_chars / expected_steps` 自检；
+若 `prompt_chars` 小于 1000 会告警——那说明误用了 v1 metadata，对照即失效。
+
+**显存提示：** LoRA 走 DDP，每张卡仍要放完整的冻结底座（约 55 GiB 静态 + 激活），
+所以 8×80GB 才跑得动；脚本会对空闲显存不足的卡发出警告（`MIN_FREE_MIB`，默认 70000）。
+
+训练结束后按脚本末尾提示跑 **base / lora_v2 / full_sft 三方评测**（同 seed、同步数）。
+
+---
+
+## 4. 环境依赖
 
 ```bash
 pip install -r requirements.txt
