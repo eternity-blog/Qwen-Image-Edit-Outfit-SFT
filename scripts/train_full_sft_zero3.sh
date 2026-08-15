@@ -139,6 +139,17 @@ if [[ -n "$SAVE_STEPS" ]]; then
   EXTRA_SAVE+=(--save_steps "$SAVE_STEPS")
 fi
 
+# Extra train.py args (logging). TensorBoard on by default so the loss curve is
+# persisted locally at $CKPT_OUT/tensorboard_log (view: tensorboard --logdir=...).
+# Backfill to wandb afterwards via scripts/logs_to_wandb.py (reads these events).
+EXTRA_TRAIN_ARGS=()
+if [[ "${ENABLE_TENSORBOARD_LOG:-1}" == "1" ]]; then
+  EXTRA_TRAIN_ARGS+=(--enable_tensorboard_log)
+fi
+if [[ "${ENABLE_WANDB_LOG:-0}" == "1" ]]; then
+  EXTRA_TRAIN_ARGS+=(--enable_wandb_log --wandb_project "${WANDB_PROJECT:-qwen-outfit-full-sft}")
+fi
+
 cd "$DIFFSYNTH_DIR"
 "$ACCEL" launch \
   --config_file "$ACCEL_CFG" \
@@ -162,7 +173,8 @@ cd "$DIFFSYNTH_DIR"
   --dataset_num_workers "${DATASET_NUM_WORKERS:-4}" \
   --find_unused_parameters \
   --zero_cond_t \
-  "${EXTRA_SAVE[@]}"
+  "${EXTRA_SAVE[@]}" \
+  "${EXTRA_TRAIN_ARGS[@]}"
 
 echo "[$(date -Is)] TRAIN DONE -> $CKPT_OUT"
 ls -lah "$CKPT_OUT" | head -20
