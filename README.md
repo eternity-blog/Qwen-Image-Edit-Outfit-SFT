@@ -8,10 +8,11 @@
 
 - **数据**：VITON-HD + IDM-VTON teacher 合成 unpaired 换装 pair，导出 DiffSynth metadata（全文 v2 prompt）
 - **训练**：DiffSynth DiT-LoRA（`zero_cond_t`）；多卡全参 ZeRO-3（`scripts/train_full_sft_zero3.sh`）
-- **评测**：与 GPT / base 对照的关键帧拼图评测
-- **发布**：合成数据已上传 Hugging Face Dataset
+- **评测**：域内留出集（有 GT）+ 业务域（GPT 参照）双轨，含指标可视化
+- **发布**：合成数据与 SFT 模型已上传 Hugging Face
 
-数据集：[lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling](https://huggingface.co/datasets/lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling)（IDM synth train/test + v2 metadata；NC 衍生许可）
+数据集：[lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling](https://huggingface.co/datasets/lee31221/Outfit_Qwen-Image-Edit-2511_in_Kling)（IDM synth train/test + v2 metadata；NC 衍生许可）  
+模型：[lee31221/Qwen-Image-Edit-Outfit-2511-SFT](https://huggingface.co/lee31221/Qwen-Image-Edit-Outfit-2511-SFT)（全参 DiT SFT，结果见 [EVAL_RESULTS](docs/EVAL_RESULTS_20260815.md)）
 
 **从零复现（含全参）：** [docs/REPRODUCE.md](docs/REPRODUCE.md)。  
 **给 Claude Code 在新机器上重建环境：** 根目录 [CLAUDE.md](CLAUDE.md)（按阶段执行即可开训）。  
@@ -28,14 +29,18 @@
 ├── requirements.txt
 ├── configs/           # env、Accelerate ZeRO 配置
 ├── prompts/           # 全文 garment-only 编辑指令
-├── scripts/           # 数据 / 训练 / 评测 / HF 上传
+├── scripts/           # 数据 / 训练 / 评测 / 可视化 / HF 上传
 ├── docs/
-│   ├── KNOWLEDGE.md   # 模型与训练相关知识详解
-│   ├── BACKGROUND.md
-│   ├── DATA.md
-│   ├── TRAINING.md
-│   ├── EVAL.md
-│   └── REPRODUCE.md
+│   ├── REPRODUCE.md          # 从零复现（含全参）
+│   ├── BACKGROUND.md         # 任务背景 + 技术选型论证
+│   ├── DATA.md               # 数据构建与 HF 发布
+│   ├── DATA_SCALING_PLAN.md  # 数据缺口诊断与扩充方案
+│   ├── TRAINING.md           # LoRA 与全参 ZeRO-3
+│   ├── EVAL.md               # 评测协议与指标定义
+│   ├── EVAL_RESULTS_*.md     # 各轮评测结果
+│   ├── FULL_SFT_RUN_*.md     # 各轮训练记录
+│   ├── KNOWLEDGE.md          # 模型与训练相关知识详解
+│   └── images/               # 文档配图
 ├── dataset_card/      # HF Dataset 卡片模板
 └── examples/
 ```
@@ -64,10 +69,11 @@ bash scripts/run_case02_v2_prompt_eval.sh   # 评测
 | [DATA](docs/DATA.md) | 数据构建与 HF 发布 |
 | [DATA_SCALING_PLAN](docs/DATA_SCALING_PLAN.md) | 数据缺口诊断与扩充方案 |
 | [TRAINING](docs/TRAINING.md) | LoRA 与全参 ZeRO-3 |
-| [EVAL](docs/EVAL.md) | 评测 |
+| [EVAL](docs/EVAL.md) | 评测协议、指标定义与读法、可视化 |
 | [EVAL_RESULTS_20260815](docs/EVAL_RESULTS_20260815.md) | 全参 SFT 双轨评测结果 |
+| [FULL_SFT_RUN_20260815](docs/FULL_SFT_RUN_20260815.md) | 全参 SFT 训练全记录 |
 | [KNOWLEDGE](docs/KNOWLEDGE.md) | 扩散编辑 / SFT / 并行与显存等知识详解 |
-| [BACKGROUND](docs/BACKGROUND.md) | 任务背景 |
+| [BACKGROUND](docs/BACKGROUND.md) | 任务背景与技术选型论证 |
 
 ## 许可
 

@@ -1,66 +1,109 @@
 #!/usr/bin/env python3
-"""record_training_details.py — capture a detailed, machine-readable snapshot of
-the training run (config + env + dataset stats + latest loss/step + gpu mem).
+"""record_training_details.py — machine-readable snapshot of a training run.
 
-Writes a JSON + a markdown summary so the user can review training details after
-the run, and so logs_to_wandb.py has a config to attach.
+Captures config + environment + dataset stats + the loss curve, so a run can be
+reviewed after the fact and `logs_to_wandb.py` has a config to attach.
+
+Loss comes from the TensorBoard events DiffSynth writes when the training script
+runs with `--enable_tensorboard_log` (on by default in train_full_sft_zero3.sh).
+DiffSynth routes loss only through ModelLogger, so scraping the text log finds
+nothing — point --tb-dir at `<output_path>/tensorboard_log`.
+
+Writes `training_details.json` and `training_details.md` into --out-dir.
 
 Usage:
-    python scripts/record_training_details.py \
-        --log $OUTPUT_ROOT/qwen_vton_full_sft/logs/train_full_sft.log \
-        --metadata $METADATA \
+    python scripts/record_training_details.py \\
+        --log $OUTPUT_ROOT/qwen_vton_full_sft/logs/train_full_sft.log \\
+        --metadata $METADATA \\
+        --tb-dir $OUTPUT_ROOT/qwen_vton_full_sft/dit_full/tensorboard_log \\
         --out-dir $OUTPUT_ROOT/qwen_vton_full_sft
 """
+
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import re
+import statistics
 import subprocess
-from datetime import datetime
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-
-STEP_RE = re.compile(
-    r"(?:step|Step)\s+(\d+)(?:\s*/\s*(\d+))?[^\d]*(?:loss[=:]?\s*)?([0-9]+\.?[0-9]*(?:e-?\d+)?)"
-    r"(?:.*?lr[=:]?\s*([0-9]+\.?[0-9]*(?:e-?\d+)?))?",
-    re.IGNORECASE,
-)
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def sh(cmd: str) -> str:
     try:
-        return subprocess.check_output(cmd, shell=True, text=True, stderr=subprocess.STDOUT, timeout=30)
-    except Exception as e:
-        return f"<{e}>"
+        return subprocess.check_output(
+            cmd, shell=True, text=True, stderr=subprocess.STDOUT, timeout=30
+        ).strip()
+    except Exception as e:  # noqa: BLE001 - best-effort probe, never fail the snapshot
+        return f"<{type(e).__name__}: {e}>"
 
 
-def parse_loss_tail(log: Path):
-    rows = []
-    if not log.exists():
-        return rows
-    with log.open("r", errors="replace") as f:
-        for line in f:
-            m = STEP_RE.search(line)
-            if m:
-                try:
-                    rows.append({
-                        "step": int(m.group(1)),
-                        "total": int(m.group(2)) if m.group(2) else None,
-                        "loss": float(m.group(3)),
-                        "lr": float(m.group(4)) if m.group(4) else None,
-                    })
-                except (TypeError, ValueError):
-                    pass
-    return rows
+def pkg_version(mod: str) -> str:
+    """Version from the *current* interpreter, not a guessed env path."""
+    try:
+        return __import__(mod).__version__
+    except Exception as e:  # noqa: BLE001
+        return f"<{type(e).__name__}>"
 
 
-def main():
+def read_tb_loss(tb_dir: Path) -> list[tuple[int, float]]:
+    if not tb_dir or not tb_dir.is_dir():
+        return []
+    try:
+        from tensorboard.backend.event_processing import event_accumulator
+    except ImportError:
+        print("[warn] tensorboard not installed; loss curve will be empty")
+        return []
+    ea = event_accumulator.EventAccumulator(
+        str(tb_dir), size_guidance={event_accumulator.SCALARS: 0}
+    )
+    ea.Reload()
+    tags = ea.Tags().get("scalars", [])
+    tag = "loss" if "loss" in tags else (tags[0] if tags else None)
+    if tag is None:
+        return []
+    return [(e.step, e.value) for e in ea.Scalars(tag)]
+
+
+def summarise_loss(points: list[tuple[int, float]], window: int = 100) -> dict:
+    if not points:
+        return {"n_points": 0}
+    vals = [v for _, v in points]
+    head = vals[:window]
+    tail = vals[-window:]
+    drop = (
+        (statistics.fmean(head) - statistics.fmean(tail)) / statistics.fmean(head) * 100.0
+        if head and statistics.fmean(head)
+        else None
+    )
+    return {
+        "n_points": len(vals),
+        "first": vals[0],
+        "last": vals[-1],
+        "mean": statistics.fmean(vals),
+        "stdev": statistics.pstdev(vals) if len(vals) > 1 else 0.0,
+        "min": min(vals),
+        "max": max(vals),
+        f"mean_first_{window}": statistics.fmean(head),
+        f"mean_last_{window}": statistics.fmean(tail),
+        "window_mean_drop_pct": drop,
+        "note": (
+            "Single-step loss is noise-dominated in diffusion training (random timestep "
+            "and noise per step). Judge progress by the window means, not first/last."
+        ),
+    }
+
+
+def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--log", required=True)
+    ap.add_argument("--log", required=True, help="train_full_sft.log (for provenance)")
     ap.add_argument("--metadata", required=True)
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--tb-dir", default="", help="<output_path>/tensorboard_log")
     ap.add_argument("--launch-cmd", default="", help="the exact command used to launch")
     args = ap.parse_args()
 
@@ -69,30 +112,28 @@ def main():
     log = Path(args.log)
     meta = Path(args.metadata)
 
-    n_samples = -1
-    sample = None
+    n_samples, sample = -1, None
     if meta.exists():
         data = json.loads(meta.read_text())
         n_samples = len(data)
         sample = data[0] if data else None
 
-    rows = parse_loss_tail(log)
-    last = rows[-1] if rows else None
-
-    nvidia = sh("nvidia-smi --query-gpu=index,name,memory.used,memory.total,utilization.gpu --format=csv,noheader")
-
+    loss_points = read_tb_loss(Path(args.tb_dir)) if args.tb_dir else []
     rec = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "repo_root": "/opt/lx/Qwen-Image-Edit-Outfit-SFT",
-        "env_dir": os.environ.get("ENV_DIR"),
-        "model_dir": os.environ.get("MODEL_DIR"),
-        "diffsynth_dir": os.environ.get("DIFFSYNTH_DIR"),
-        "qwen_vton_data": os.environ.get("QWEN_VTON_DATA"),
-        "output_root": os.environ.get("OUTPUT_ROOT"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "repo_root": str(REPO_ROOT),
+        "python": sys.executable,
+        "env": {
+            k: os.environ.get(k)
+            for k in ("ENV_DIR", "MODEL_DIR", "DIFFSYNTH_DIR", "QWEN_VTON_DATA", "OUTPUT_ROOT")
+        },
         "gpu": {
-            "count": sh("nvidia-smi -L | wc -l").strip(),
-            "list": sh("nvidia-smi -L").strip().splitlines(),
-            "current": nvidia.strip().splitlines(),
+            "count": sh("nvidia-smi -L | wc -l"),
+            "list": sh("nvidia-smi -L").splitlines(),
+            "current": sh(
+                "nvidia-smi --query-gpu=index,name,memory.used,memory.total,"
+                "utilization.gpu --format=csv,noheader"
+            ).splitlines(),
         },
         "dataset": {
             "metadata": str(meta),
@@ -101,20 +142,43 @@ def main():
         },
         "training": {
             "log": str(log),
+            "log_exists": log.exists(),
             "launch_cmd": args.launch_cmd,
-            "loss_steps_parsed": len(rows),
-            "latest_step": last,
+            "tb_dir": args.tb_dir,
+            "loss": summarise_loss(loss_points),
         },
-        "env_versions": {
-            "torch": sh("$ENV_DIR/bin/python -c 'import torch;print(torch.__version__)'").strip(),
-            "deepspeed": sh("$ENV_DIR/bin/python -c 'import deepspeed;print(deepspeed.__version__)'").strip(),
-            "accelerate": sh("$ENV_DIR/bin/python -c 'import accelerate;print(accelerate.__version__)'").strip(),
-            "diffusers": sh("$ENV_DIR/bin/python -c 'import diffusers;print(diffusers.__version__)'").strip(),
-        },
+        "versions": {m: pkg_version(m) for m in ("torch", "deepspeed", "accelerate", "diffusers")},
     }
 
     (out / "training_details.json").write_text(json.dumps(rec, indent=2, default=str))
+
+    loss = rec["training"]["loss"]
+    md = [
+        "# Training details",
+        "",
+        f"- captured: {rec['timestamp']}",
+        f"- samples: {n_samples}, prompt chars: {rec['dataset']['sample_prompt_chars']}",
+        f"- GPUs: {rec['gpu']['count']}",
+        f"- versions: {rec['versions']}",
+        "",
+    ]
+    if loss.get("n_points"):
+        md += [
+            "## Loss",
+            "",
+            f"- points: {loss['n_points']}",
+            f"- window mean: {loss['mean_first_100']:.5f} -> {loss['mean_last_100']:.5f}"
+            f" ({loss['window_mean_drop_pct']:.1f}% drop)",
+            f"- overall mean {loss['mean']:.5f} (stdev {loss['stdev']:.5f})",
+            "",
+            f"> {loss['note']}",
+        ]
+    else:
+        md += ["## Loss", "", "No TensorBoard scalars found — pass --tb-dir."]
+    (out / "training_details.md").write_text("\n".join(md) + "\n", encoding="utf-8")
+
     print(json.dumps(rec, indent=2, default=str))
+    print(f"\nwrote {out / 'training_details.json'} and {out / 'training_details.md'}")
 
 
 if __name__ == "__main__":

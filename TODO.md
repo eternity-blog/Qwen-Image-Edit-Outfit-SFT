@@ -10,15 +10,15 @@
 - [x] 8 卡全参 SFT 跑通并上传模型（`lee31221/Qwen-Image-Edit-Outfit-2511-SFT`）  
 - [x] 双轨评测：VITON 留出集 + case02 业务域（见 EVAL_RESULTS_20260815.md）  
 - [x] 数据缺口诊断与扩充方案（DATA_SCALING_PLAN.md）  
+- [x] 指标定义/读法文档化 + 可视化脚本（EVAL.md、`visualize_metrics.py`）  
+- [x] 仓库清理：合并可视化脚本、删除死配置、修 `record_training_details.py`  
 
 ## Next
 
 - [ ] **prompt 表层增广**后重训（方案 1，零新增图片，验证「指令单一」是否为主因）  
 - [ ] **真实帧 + GPT 作第二 teacher**（方案 4，补目标域 / 字幕 / 颜色保真）  
 - [ ] 扩 pair 到 k=3~5（方案 2）  
-- [ ] 修 `record_training_details.py`：硬编码 repo_root、`$ENV_DIR` 字面量、无效 loss 正则  
 - [ ] 模型仓库当前为 private，决定是否公开  
-- [ ] 删掉未被引用的 `configs/ds_zero3_bf16_example.json`（实际用 accelerate yaml）  
 - [ ] 把 nvidia-smi 采样并入训练脚本（当前显存数据依赖手动采样，不可复现）  
 
 ## Deferred

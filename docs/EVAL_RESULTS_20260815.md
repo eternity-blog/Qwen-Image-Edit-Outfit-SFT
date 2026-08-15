@@ -39,6 +39,20 @@
 全部 6 组见 `outputs/viton_holdout_0815/*_compare.jpg`（`outputs/` 不入 git）。
 VITON-HD 素材为 CC BY-NC，此处仅作研究用途展示，见 [NOTICE.md](../NOTICE.md)。
 
+### 指标可视化
+
+标量看不出差异**分布在哪**，用 `scripts/visualize_metrics.py` 展开：
+
+![metrics visualization](images/metrics_viz_mpl_09183.jpg)
+
+三点值得注意：
+
+1. 第 2 行第 1 格 `|person − teacher|` 是 18.64 基线的可视化——正确换装只该点亮上衣区域
+2. `base` 的热力图连**人脸都在发亮**（身份被改），`full_sft` 大面积深蓝
+3. 最下方 CDF 里 `base` 曲线**全程在 person 基线之下**：不只是均值差，而是在每个差异档位上都比原封不动更糟
+
+指标定义、读法与陷阱见 [EVAL.md](EVAL.md#指标定义)。
+
 ---
 
 ## 2. 业务域：case02 真实关键帧 + GPT Image 2 参照

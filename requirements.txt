@@ -9,10 +9,12 @@ safetensors
 pillow
 numpy
 opencv-python-headless
+matplotlib
 sentencepiece
 protobuf
 peft
 huggingface_hub
+tensorboard
 
 # Optional teacher / tooling
 # install DiffSynth-Studio editable from git when training:
