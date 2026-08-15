@@ -66,19 +66,56 @@
 
 ---
 
-### 方案 2 — 同素材扩 pair（低成本）
+### 方案 2 — 同素材扩 pair（低成本，已实施 batch2）
 
-每个人物目前只配 1 件衣服，而理论组合有 1.357 亿。把 k 提到 3–5：
+VITON-HD 自带的 `train_pairs.txt` 只给了**一种**固定配对，batch1 正是它，所以每个人物只出现一次。
+扩量 = 生成新的配对排列。
 
-| k | 训练 pairs |
-|---|---|
-| 1（现状） | 11 647 |
-| 3 | 34 941 |
-| 5 | 58 235 |
+| k | 累计 pairs | 新增 | 2 卡耗时 | 8 卡耗时 |
+|---|---|---|---|---|
+| 1（batch1） | 11 647 | — | — | — |
+| 2（batch2） | 23 294 | 11 647 | 6.3 h | 1.6 h |
+| 3 | 34 941 | 23 294 | 12.7 h | 3.2 h |
+| 5 | 58 235 | 46 588 | 25.3 h | 6.3 h |
 
-**成本：** 仅 IDM teacher 推理时间，图片素材不新增。
-**注意：** 配对要随机且避免同 id 自配（同 id 会退化成重建任务而非换装，见 KNOWLEDGE.md）。
-**先测吞吐再排期：** 用 `run_idm_batch_synth.sh` 跑 200 条测单卡 s/张，再乘以目标量估算。
+**实测吞吐：920 张/小时/卡**（batch1 4 卡 3.17h 反推，batch2 2 卡实测复现同一数字）。
+单图约 51.7 KB，磁盘可忽略。
+
+**组合上限 vs 多样性上限（重要）：** 排除同 id 自配后组合数约 1.356 亿，看似无限；
+但视觉素材始终是那 11 647 个人 + 11 647 件衣服，扩 k 只是重新排列，
+**不新增任何人物或服装本体**，收益递减。真正增加视觉多样性要靠方案 3（DressCode）与方案 4。
+
+#### 批次组织
+
+```text
+$QWEN_VTON_DATA/synth/
+├── idm_unpaired_train/          # batch1
+├── idm_unpaired_train_b2/       # batch2
+│   ├── images/
+│   ├── manifest.jsonl
+│   ├── pairs_b2.txt
+│   └── batch_meta_b2.json       # seed / 去重统计 / 保证项
+└── ...
+```
+
+上传到**同一个 HF 仓库**并列存放，沿用 `images/part-XXXX/` 分片（HF 单目录 ≤1 万文件）。
+
+```bash
+# 1) 生成配对：自动排除同 id 自配，并与所有既往批次去重（写盘前断言校验）
+python scripts/make_pair_batch.py \
+  --viton-root $QWEN_VTON_DATA/raw/viton_hd \
+  --prev $QWEN_VTON_DATA/synth/idm_unpaired_train \
+  --out $QWEN_VTON_DATA/synth/idm_unpaired_train_b2/pairs_b2.txt \
+  --batch-id b2 --seed 2
+
+# 2) 多卡合成（可断点续跑，已存在的图会跳过）
+BATCH_ID=b2 GPU_LIST=0,5 bash scripts/run_idm_synth_batch.sh
+
+# 3) 合并各 shard 的 manifest
+bash scripts/merge_idm_shard_manifests.sh $QWEN_VTON_DATA/synth/idm_unpaired_train_b2
+```
+
+再加批次时把每个既往批次都用 `--prev` 传进去，即可保证全局零重复。
 
 ---
 
