@@ -46,6 +46,12 @@ def main() -> None:
     ap.add_argument("--idm-dir", required=True)
     ap.add_argument("--vton-dir", default="")
     ap.add_argument("--out-dir", required=True)
+    ap.add_argument(
+        "--idm-label",
+        default="IDM-LoRA",
+        help="panel label for --idm-dir; set to e.g. full_sft when comparing another model",
+    )
+    ap.add_argument("--vton-label", default="VTON-LoRA")
     args = ap.parse_args()
 
     base_dir = Path(args.base_dir)
@@ -76,8 +82,8 @@ def main() -> None:
         if vton_dir is not None:
             vton_img = vton_dir / "qwen" / f"{tag}.png"
             if vton_img.is_file():
-                panels.append(("VTON-LoRA", Image.open(vton_img).convert("RGB")))
-        panels.append(("IDM-LoRA", Image.open(idm_img).convert("RGB")))
+                panels.append((args.vton_label, Image.open(vton_img).convert("RGB")))
+        panels.append((args.idm_label, Image.open(idm_img).convert("RGB")))
         title = f"case02 {tag}  prompt={base_meta.get('prompt_mode', '?')}"
         grid = make_grid(panels, title)
         out_path = grid_dir / f"{tag}_compare.jpg"
@@ -86,13 +92,13 @@ def main() -> None:
         print("wrote", out_path)
 
     summary = [
-        "# Case02: base vs IDM-LoRA (vs VTON-LoRA)",
+        f"# Case02: base vs {args.idm_label}",
         "",
         f"- prompt_mode: `{base_meta.get('prompt_mode')}`",
         f"- steps: `{base_meta.get('steps')}`",
         f"- n_grids: {len(rows)}",
         "",
-        "Panels: source | GPT Image 2 | Qwen base | [VTON-LoRA] | IDM-LoRA",
+        f"Panels: source | GPT Image 2 | Qwen base | [{args.vton_label}] | {args.idm_label}",
         "",
         "Note: short prompt matches LoRA training style; EditPlus does not truncate live v2 prompts (domain gap > length).",
         "",

@@ -62,8 +62,10 @@ bash scripts/run_case02_v2_prompt_eval.sh   # 评测
 |---|---|
 | [REPRODUCE](docs/REPRODUCE.md) | 从零复现 |
 | [DATA](docs/DATA.md) | 数据构建与 HF 发布 |
+| [DATA_SCALING_PLAN](docs/DATA_SCALING_PLAN.md) | 数据缺口诊断与扩充方案 |
 | [TRAINING](docs/TRAINING.md) | LoRA 与全参 ZeRO-3 |
 | [EVAL](docs/EVAL.md) | 评测 |
+| [EVAL_RESULTS_20260815](docs/EVAL_RESULTS_20260815.md) | 全参 SFT 双轨评测结果 |
 | [KNOWLEDGE](docs/KNOWLEDGE.md) | 扩散编辑 / SFT / 并行与显存等知识详解 |
 | [BACKGROUND](docs/BACKGROUND.md) | 任务背景 |
 

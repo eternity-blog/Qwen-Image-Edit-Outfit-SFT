@@ -59,6 +59,12 @@ COMMON=(
   --seed 0
 )
 
+# On a shared box a single 80GB card may not hold DiT+TE+VAE (~57.7GB bf16)
+# alongside another tenant's allocation. CPU_OFFLOAD=1 streams modules per-step.
+if [[ "${CPU_OFFLOAD:-0}" == "1" ]]; then
+  COMMON+=(--cpu-offload)
+fi
+
 # Dump prompts once (no model load) for audit.
 "$ENV_DIR/bin/python" - <<PY
 import json, sys
@@ -118,6 +124,7 @@ echo "[$(date -Is)] === COMPOSE ==="
   --base-dir "$OUT_ROOT/base" \
   --idm-dir "$OUT_ROOT/idm" \
   --vton-dir "" \
+  --idm-label "${MODEL_B_LABEL:-IDM-LoRA}" \
   --out-dir "$OUT_ROOT"
 
 # rewrite summary header for P0
