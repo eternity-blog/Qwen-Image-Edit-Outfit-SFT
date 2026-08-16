@@ -99,11 +99,7 @@ case02 没有正确答案图，只能测「MAD vs 源帧」。此时用 **GPT Im
 标量看不出**差异分布在哪**——「重绘整幕」和「精确换装」可能给出相近的 MAD。用：
 
 ```bash
-# 默认 matplotlib 后端：带数值 colorbar、真实 H/S 坐标轴、差异 CDF
 python scripts/visualize_metrics.py --eval-dir $OUTPUT_ROOT/viton_holdout_eval
-
-# 无额外依赖的 opencv 后端：面板更大更紧凑，适合批量快速质检
-python scripts/visualize_metrics.py --eval-dir ... --backend cv2
 ```
 
 输出一张「列=对象、行=视角」的图：
@@ -112,8 +108,8 @@ python scripts/visualize_metrics.py --eval-dir ... --backend cv2
 |---|---|
 | 1 | 原图：person / teacher / 各模型 |
 | 2 | `\|x − teacher\|` 差分热力图（TURBO，固定裁剪在 128，蓝=相同 红=差异大） |
-| 3 | H-S 二维直方图（开方显示，避免小值不可见） |
-| 4 | 每像素差异的 CDF（仅 mpl 后端） |
+| 3 | H-S 二维直方图（真实 H/S 坐标轴，开方显示避免小值不可见） |
+| 4 | 每像素差异的 CDF |
 
 **第 2 行第 1 格是钥匙**：它画的是 `|person − teacher|`，也就是基线的可视化——
 **一次正确换装该动哪些像素**。实测中它只在上衣区域发红，裤子/背景/脸保持深蓝。
@@ -126,13 +122,9 @@ base 的热力图连人脸都在发亮（身份被改），full_sft 则大面积
 
 固定裁剪 128 是为了让不同面板、不同样本、不同轮次之间可以横向比较，不要改成自适应。
 
-matplotlib 后端实例（`base` 的差分几乎铺满全图并波及人脸，`full_sft` 大面积深蓝）：
+实例（七方对照，`base` 的差分几乎铺满全图并波及人脸，训练后的各变体大面积深蓝）：
 
-![metrics visualization, matplotlib backend](images/metrics_viz_mpl_09183.jpg)
-
-opencv 后端实例（无额外依赖，面板更大更紧凑，但没有数值刻度与 CDF）：
-
-![metrics visualization, cv2 backend](images/metrics_viz_cv2_09183.jpg)
+![metrics visualization](images/metrics_viz_7way_09183.jpg)
 
 ---
 
