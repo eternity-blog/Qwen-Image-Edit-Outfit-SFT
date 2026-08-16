@@ -14,17 +14,17 @@
 - [x] case02 业务域补齐 LoRA 列 + 参考图数量对照（定位崩溃主因是多参考输入）  
 - [x] batch2 合成 11 647 条并发布 HF（与 batch1 零重复）  
 - [x] b1+b2 合并数据全参 SFT（22 829 条 / 2854 步 / 4h41m，见 FULL_SFT_B1B2_RUN）  
+- [x] b1b2 模型评测：配对检验三项指标**均无显著变化**，证伪「堆配对数量」路线  
 - [x] 指标定义/读法文档化 + 可视化脚本（EVAL.md、`visualize_metrics.py`）  
 - [x] 仓库清理：合并可视化脚本、删除死配置、修 `record_training_details.py`  
 
 ## Next
 
-- [ ] **评测 b1b2 模型**：与 b1-only + base 三方对比（训练 loss 落在噪声带内，无法判定数据翻倍是否有增益）  
 - [ ] 补交 `scripts/launch_full_sft_observable.sh`：FULL_SFT_B1B2_RUN 第 6 节称其"封装成可复用"，但该文件只在训练机上、未进仓库  
 - [ ] **多参考训练数据**：随机化 `n_product_refs ∈ {1,2,3}`（P0，已证实是业务域最大单点故障）  
 - [ ] **prompt 表层增广**后重训（方案 1，零新增图片；已知不是 case02 主因，降为 P2）  
 - [ ] **真实帧 + GPT 作第二 teacher**（方案 4，补目标域 / 字幕 / 颜色保真）  
-- [ ] 扩 pair 到 k=3（batch3；batch2 已完成）  
+- [ ] ~~扩 pair 到 k=3~~（k=2 已证伪，先验变差；如做需先说明为何期待拐点）  
 - [ ] 把 nvidia-smi 采样并入训练脚本（当前显存数据依赖手动采样，不可复现）  
 
 ## Deferred

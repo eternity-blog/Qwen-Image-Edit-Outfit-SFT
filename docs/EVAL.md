@@ -122,9 +122,9 @@ base 的热力图连人脸都在发亮（身份被改），full_sft 则大面积
 
 固定裁剪 128 是为了让不同面板、不同样本、不同轮次之间可以横向比较，不要改成自适应。
 
-实例（七方对照，`base` 的差分几乎铺满全图并波及人脸，训练后的各变体大面积深蓝）：
+实例（八方对照，`base` 的差分几乎铺满全图并波及人脸，训练后的各变体大面积深蓝）：
 
-![metrics visualization](images/metrics_viz_7way_09183.jpg)
+![metrics visualization](images/metrics_viz_8way_09183.jpg)
 
 ---
 
