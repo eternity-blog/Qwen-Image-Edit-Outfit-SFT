@@ -39,6 +39,49 @@ import prompts_train_v2 as pv2  # noqa: E402
 import zero_shot_compare as z  # noqa: E402
 
 
+def load_pipeline_with_lora(
+    base_dir: Path, adapter: Path, device: str, cpu_offload: bool, scale: float = 1.0
+):
+    """Base pipeline with a LoRA adapter fused in memory.
+
+    Avoids materialising a ~54GB fused directory per adapter. DiffSynth writes its
+    LoRA with `pipe.dit.` / `lora_A.default` naming, which diffusers' loader does not
+    recognise, so fall back to the same key remap `fuse_qwen_edit_lora.py` performs.
+    """
+    import tempfile
+
+    from safetensors.torch import load_file, save_file
+
+    pipe = z.load_pipeline(base_dir, device, torch.bfloat16, cpu_offload=cpu_offload)
+    try:
+        pipe.load_lora_weights(str(adapter.parent), weight_name=adapter.name)
+    except Exception as e:  # noqa: BLE001 - expected for DiffSynth-native adapters
+        print(f"  direct LoRA load failed ({type(e).__name__}); remapping keys")
+        sd = load_file(str(adapter))
+        remapped = {}
+        for k, v in sd.items():
+            nk = k
+            if nk.startswith("pipe.dit."):
+                nk = nk[len("pipe.dit.") :]
+            if not nk.startswith("transformer."):
+                nk = "transformer." + nk
+            nk = nk.replace(".lora_A.default.", ".lora_A.").replace(
+                ".lora_B.default.", ".lora_B."
+            )
+            remapped[nk] = v
+        tmpdir = Path(tempfile.mkdtemp(prefix="lora_remap_"))
+        tmpf = tmpdir / "adapter.safetensors"
+        save_file(remapped, str(tmpf))
+        print(f"  remapped {len(remapped)} keys -> {tmpf}")
+        pipe.load_lora_weights(str(tmpdir), weight_name=tmpf.name)
+    pipe.fuse_lora(lora_scale=scale)
+    try:
+        pipe.unload_lora_weights()
+    except Exception as e:  # noqa: BLE001
+        print(f"  unload_lora_weights warn: {e}")
+    return pipe
+
+
 def pick_rows(manifest: Path, viton_root: Path, synth_images: Path, n: int, seed: int):
     rows = []
     for line in manifest.read_text(encoding="utf-8").splitlines():
@@ -95,10 +138,23 @@ def main() -> None:
     ap.add_argument(
         "--model",
         action="append",
-        required=True,
+        default=[],
         metavar="NAME=PATH",
-        help="repeatable; evaluated in the given order",
+        help="full model dir; repeatable, evaluated in the given order",
     )
+    ap.add_argument(
+        "--lora",
+        action="append",
+        default=[],
+        metavar="NAME=ADAPTER.safetensors",
+        help="LoRA adapter fused onto --lora-base in memory; repeatable",
+    )
+    ap.add_argument(
+        "--lora-base",
+        default="",
+        help="base model for --lora (defaults to the first --model, else required)",
+    )
+    ap.add_argument("--lora-scale", type=float, default=1.0)
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--n", type=int, default=6)
     ap.add_argument("--seed", type=int, default=0)
@@ -112,14 +168,28 @@ def main() -> None:
     ap.add_argument("--facing", default="front")
     args = ap.parse_args()
 
-    models = []
+    models: list[tuple[str, Path, str]] = []
     for spec in args.model:
         if "=" not in spec:
             raise SystemExit(f"--model expects NAME=PATH, got {spec}")
         name, path = spec.split("=", 1)
         if not (Path(path) / "model_index.json").is_file():
             raise SystemExit(f"{name}: no model_index.json under {path}")
-        models.append((name, Path(path)))
+        models.append((name, Path(path), "dir"))
+
+    lora_base = Path(args.lora_base) if args.lora_base else (models[0][1] if models else None)
+    for spec in args.lora:
+        if "=" not in spec:
+            raise SystemExit(f"--lora expects NAME=PATH, got {spec}")
+        name, path = spec.split("=", 1)
+        if not Path(path).is_file():
+            raise SystemExit(f"{name}: adapter not found: {path}")
+        if lora_base is None or not (lora_base / "model_index.json").is_file():
+            raise SystemExit("--lora needs --lora-base pointing at a base model dir")
+        models.append((name, Path(path), "lora"))
+
+    if not models:
+        raise SystemExit("nothing to evaluate: pass --model and/or --lora")
 
     width, height = (int(v) for v in args.size.lower().split("x"))
     out = Path(args.out_dir)
@@ -142,16 +212,48 @@ def main() -> None:
         print("  ", r["id"], flush=True)
 
     results: dict[str, dict] = {}
-    for name, path in models:
+    for name, path, kind in models:
         model_out = out / name
         model_out.mkdir(parents=True, exist_ok=True)
-        pipe = z.load_pipeline(path, args.device, torch.bfloat16, cpu_offload=args.cpu_offload)
-        per_model = {}
-        for i, r in enumerate(rows, 1):
+
+        # Score any images a previous run already produced, so resuming still yields
+        # a complete table instead of silently dropping those models.
+        per_model: dict[str, dict] = {}
+        todo = []
+        for r in rows:
             dest = model_out / f"{r['id']}.jpg"
             if dest.is_file():
-                print(f"[{name} {i}/{len(rows)}] skip {r['id']} (exists)", flush=True)
-                continue
+                person = z.load_rgb(r["person"])
+                teacher = z.load_rgb(r["teacher"])
+                img = z.load_rgb(dest)
+                mad_p, hist_p = z.mad_and_hist(person, img)
+                mad_t, hist_t = z.mad_and_hist(teacher, img)
+                per_model[r["id"]] = {
+                    "secs": 0.0,
+                    "mad_vs_person": round(mad_p, 3),
+                    "hist_vs_person": round(hist_p, 4),
+                    "mad_vs_teacher": round(mad_t, 3),
+                    "hist_vs_teacher": round(hist_t, 4),
+                    "reused": True,
+                }
+            else:
+                todo.append(r)
+        if per_model:
+            print(f"[{name}] reused {len(per_model)} existing image(s)", flush=True)
+        if not todo:
+            results[name] = per_model
+            continue
+
+        if kind == "lora":
+            print(f"[{name}] base={lora_base} + adapter={path}", flush=True)
+            pipe = load_pipeline_with_lora(
+                lora_base, path, args.device, args.cpu_offload, args.lora_scale
+            )
+        else:
+            pipe = z.load_pipeline(path, args.device, torch.bfloat16, cpu_offload=args.cpu_offload)
+
+        for i, r in enumerate(todo, 1):
+            dest = model_out / f"{r['id']}.jpg"
             person = z.load_rgb(r["person"])
             cloth = z.load_rgb(r["cloth"])
             t0 = time.time()
@@ -170,8 +272,13 @@ def main() -> None:
             )
             img.save(dest, quality=95)
             teacher = z.load_rgb(r["teacher"])
-            mad_person, hist_person = z.mad_and_hist(person, img)
-            mad_teacher, hist_teacher = z.mad_and_hist(teacher, img)
+            # Score the saved JPEG, not the in-memory image: JPEG chroma subsampling
+            # shifts the H-S histogram (leaving greyscale MAD nearly untouched), so
+            # mixing fresh and reloaded images would make hist corr incomparable
+            # between a first run and a resumed one.
+            saved = z.load_rgb(dest)
+            mad_person, hist_person = z.mad_and_hist(person, saved)
+            mad_teacher, hist_teacher = z.mad_and_hist(teacher, saved)
             per_model[r["id"]] = {
                 "secs": round(time.time() - t0, 1),
                 "mad_vs_person": round(mad_person, 3),
@@ -180,7 +287,7 @@ def main() -> None:
                 "hist_vs_teacher": round(hist_teacher, 4),
             }
             print(
-                f"[{name} {i}/{len(rows)}] {r['id']} {per_model[r['id']]['secs']}s "
+                f"[{name} {i}/{len(todo)}] {r['id']} {per_model[r['id']]['secs']}s "
                 f"MAD person/teacher={mad_person:.1f}/{mad_teacher:.1f}",
                 flush=True,
             )
@@ -194,7 +301,7 @@ def main() -> None:
             ("garment (ref)", z.load_rgb(r["cloth"])),
             ("IDM-VTON teacher", z.load_rgb(r["teacher"])),
         ]
-        for name, _ in models:
+        for name, _, _kind in models:
             p = out / name / f"{r['id']}.jpg"
             if p.is_file():
                 panels.append((name, z.load_rgb(p)))

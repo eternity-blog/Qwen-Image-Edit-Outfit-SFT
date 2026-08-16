@@ -10,17 +10,17 @@
 - [x] 8 卡全参 SFT 跑通并上传模型（`lee31221/Qwen-Image-Edit-Outfit-2511-SFT`）  
 - [x] 双轨评测：VITON 留出集 + case02 业务域（见 EVAL_RESULTS_20260815.md）  
 - [x] 数据缺口诊断与扩充方案（DATA_SCALING_PLAN.md）  
+- [x] 同数据 LoRA 对照 + LR 扫描（4 个 LR 点，配对检验：r16 LoRA 与全参打平）  
+- [x] batch2 合成 11 647 条并发布 HF（与 batch1 零重复）  
 - [x] 指标定义/读法文档化 + 可视化脚本（EVAL.md、`visualize_metrics.py`）  
 - [x] 仓库清理：合并可视化脚本、删除死配置、修 `record_training_details.py`  
 
 ## Next
 
-- [ ] **用 v2 数据重训 LoRA**（缺失的对照实验：现有 LoRA 训的是 v1 短英文 prompt，
-      与全参不同数据，故「全参 vs LoRA」目前无法成立。约 4h/4×H100，见 EVAL_RESULTS 第 3 节）  
 - [ ] **prompt 表层增广**后重训（方案 1，零新增图片，验证「指令单一」是否为主因）  
 - [ ] **真实帧 + GPT 作第二 teacher**（方案 4，补目标域 / 字幕 / 颜色保真）  
-- [ ] 扩 pair 到 k=3~5（方案 2）  
-- [ ] 模型仓库当前为 private，决定是否公开  
+- [ ] 业务域 case02 补 LoRA 一列（域内已打平，真实帧上是否一致未知）  
+- [ ] 扩 pair 到 k=3（batch3；batch2 已完成）  
 - [ ] 把 nvidia-smi 采样并入训练脚本（当前显存数据依赖手动采样，不可复现）  
 
 ## Deferred
