@@ -69,6 +69,22 @@
 
 ![六方对照：训练后各变体肉眼难分，只有 base 明显不同](images/holdout_6way_09183.jpg)
 
+栏位：`人物 | 服装 | IDM teacher | base | lora_v2 | full_sft | lr5e-5 | lr2e-4 | lr5e-4`。
+
+下面这个样本最能说明差距——参考服装是米色碎花配黄色圆点口袋，
+**base 直接画成蓝色衬衫**（它在该样本上 MAD 高达 47.4），五个训练后的变体则全部还原正确：
+
+![base 把米色画成蓝色，训练后各变体均正确](images/holdout_6way_06675_color.jpg)
+
+### 指标可视化（六方）
+
+![六方指标可视化](images/metrics_viz_6way_09183.jpg)
+
+第二行热力图是关键：最左 `|person − teacher| MAD=22.1` 是「正确换装该动哪些像素」的基线，
+红色只集中在上衣。对比之下 **base 整图发亮、连人脸都在变**，
+而五个训练变体（7.3–8.6）都是大片深蓝、只剩轮廓细线，**彼此肉眼不可分**。
+最下方 CDF 里 base 单独垂在下方，其余五条挤成一束——这就是配对检验「无法区分」的视觉版本。
+
 ![base 改构图与颜色，full_sft 保住取景](images/viton_holdout_09183_base_vs_fullsft.jpg)
 
 ![base 人脸漂移，full_sft 船领+七分袖对上参考图](images/viton_holdout_03922_base_vs_fullsft.jpg)
