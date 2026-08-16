@@ -76,6 +76,9 @@
 ## 6. 可观测性封装
 
 用新写的 `scripts/launch_full_sft_observable.sh`(b1-only run 的 launch_config/nvidia-smi 是 ad-hoc 的,这次封装成可复用):
+
+> **⚠️ 该脚本尚未进仓库**——只存在于训练机本地，所以目前对其他人**并不可复用**。
+> 已记在 TODO，需从训练机补交。
 1. `launch_config.json` — 配置快照,挂到 wandb run config + 本报告
 2. `nvidia-smi -l 60` — GPU 显存/利用率/温度/功耗 CSV 时间线(报告第 8 节来源)
 3. `record_training_details.py` — 训练后 training_details.json/md 快照

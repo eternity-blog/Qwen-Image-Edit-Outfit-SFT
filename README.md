@@ -39,7 +39,8 @@
 │   ├── TRAINING.md           # LoRA 与全参 ZeRO-3
 │   ├── EVAL.md               # 评测协议、指标定义与读法
 │   ├── EVAL_RESULTS_*.md     # 各轮评测结果（含对照有效边界）
-│   ├── FULL_SFT_RUN_*.md     # 全参训练全记录
+│   ├── HP_SWEEP_PLAN.md      # 单变量超参扫描方案
+│   ├── FULL_SFT_*_RUN_*.md   # 全参训练全记录（b1 / b1+b2）
 │   ├── LORA_V2_RUN_*.md      # 同数据 LoRA 对照训练记录
 │   ├── KNOWLEDGE.md          # 扩散编辑 / SFT / 并行与显存
 │   ├── images/               # 文档配图（评测对照图）
@@ -77,7 +78,9 @@ bash scripts/run_case02_v2_prompt_eval.sh   # 评测
 | [TRAINING](docs/TRAINING.md) | LoRA 与全参 ZeRO-3 |
 | [EVAL](docs/EVAL.md) | 评测协议、指标定义与读法、可视化 |
 | [EVAL_RESULTS_20260815](docs/EVAL_RESULTS_20260815.md) | 双轨评测结果：7 模型对照、LR 扫描、失效归因 |
-| [FULL_SFT_RUN_20260815](docs/FULL_SFT_RUN_20260815.md) | 全参 SFT 训练全记录 |
+| [FULL_SFT_RUN_20260815](docs/FULL_SFT_RUN_20260815.md) | 全参 SFT 训练全记录（b1，11 415 条） |
+| [FULL_SFT_B1B2_RUN_20260816](docs/FULL_SFT_B1B2_RUN_20260816.md) | 全参 SFT 训练全记录（b1+b2，22 829 条） |
+| [HP_SWEEP_PLAN](docs/HP_SWEEP_PLAN.md) | 单变量超参扫描方案 |
 | [LORA_V2_RUN_20260815](docs/LORA_V2_RUN_20260815.md) | 同数据 LoRA 对照训练记录 |
 | [KNOWLEDGE](docs/KNOWLEDGE.md) | 扩散编辑 / SFT / 并行与显存等知识详解 |
 | [BACKGROUND](docs/BACKGROUND.md) | 任务背景与技术选型论证 |
