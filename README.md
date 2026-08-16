@@ -27,23 +27,28 @@
 ├── LICENSE / NOTICE.md
 ├── TODO.md
 ├── requirements.txt
-├── configs/           # env、Accelerate ZeRO 配置
-├── prompts/           # 全文 garment-only 编辑指令
-├── scripts/           # 数据 / 训练 / 评测 / 可视化 / HF 上传
+├── configs/           # env 模板、Accelerate ZeRO 配置
+├── prompts/           # 全文 garment-only 编辑指令模板
+├── scripts/           # 48 个脚本，分组见 docs/SCRIPTS.md
 ├── docs/
+│   ├── SCRIPTS.md            # 脚本索引：按用途分组，标注当前主线
 │   ├── REPRODUCE.md          # 从零复现（含全参）
 │   ├── BACKGROUND.md         # 任务背景 + 技术选型论证
 │   ├── DATA.md               # 数据构建与 HF 发布
 │   ├── DATA_SCALING_PLAN.md  # 数据缺口诊断与扩充方案
 │   ├── TRAINING.md           # LoRA 与全参 ZeRO-3
-│   ├── EVAL.md               # 评测协议与指标定义
-│   ├── EVAL_RESULTS_*.md     # 各轮评测结果
-│   ├── FULL_SFT_RUN_*.md     # 各轮训练记录
-│   ├── KNOWLEDGE.md          # 模型与训练相关知识详解
-│   └── images/               # 文档配图
+│   ├── EVAL.md               # 评测协议、指标定义与读法
+│   ├── EVAL_RESULTS_*.md     # 各轮评测结果（含对照有效边界）
+│   ├── FULL_SFT_RUN_*.md     # 全参训练全记录
+│   ├── LORA_V2_RUN_*.md      # 同数据 LoRA 对照训练记录
+│   ├── KNOWLEDGE.md          # 扩散编辑 / SFT / 并行与显存
+│   ├── images/               # 文档配图（评测对照图）
+│   └── archive/              # 早期方案留档
 ├── dataset_card/      # HF Dataset 卡片模板
-└── examples/
+└── examples/          # metadata 单条样例
 ```
+
+`outputs/` 被 gitignore：评测拼图、指标可视化、训练日志都在那里，不随仓库分发。
 
 大权重与原始数据不进 git；路径用 `configs/env.local.sh`（见 `configs/env.example.sh`）。
 
@@ -65,13 +70,15 @@ bash scripts/run_case02_v2_prompt_eval.sh   # 评测
 
 | 文档 | 内容 |
 |---|---|
+| [SCRIPTS](docs/SCRIPTS.md) | 脚本索引（48 个，按用途分组） |
 | [REPRODUCE](docs/REPRODUCE.md) | 从零复现 |
 | [DATA](docs/DATA.md) | 数据构建与 HF 发布 |
 | [DATA_SCALING_PLAN](docs/DATA_SCALING_PLAN.md) | 数据缺口诊断与扩充方案 |
 | [TRAINING](docs/TRAINING.md) | LoRA 与全参 ZeRO-3 |
 | [EVAL](docs/EVAL.md) | 评测协议、指标定义与读法、可视化 |
-| [EVAL_RESULTS_20260815](docs/EVAL_RESULTS_20260815.md) | 全参 SFT 双轨评测结果 |
+| [EVAL_RESULTS_20260815](docs/EVAL_RESULTS_20260815.md) | 双轨评测结果：7 模型对照、LR 扫描、失效归因 |
 | [FULL_SFT_RUN_20260815](docs/FULL_SFT_RUN_20260815.md) | 全参 SFT 训练全记录 |
+| [LORA_V2_RUN_20260815](docs/LORA_V2_RUN_20260815.md) | 同数据 LoRA 对照训练记录 |
 | [KNOWLEDGE](docs/KNOWLEDGE.md) | 扩散编辑 / SFT / 并行与显存等知识详解 |
 | [BACKGROUND](docs/BACKGROUND.md) | 任务背景与技术选型论证 |
 
