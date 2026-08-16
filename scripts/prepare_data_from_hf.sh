@@ -84,11 +84,11 @@ PY
 fi
 
 echo "[$(date -Is)] flatten HF synth part-* -> synth/*/images"
-for split in idm_unpaired idm_unpaired_train; do
+for split in idm_unpaired idm_unpaired_train idm_unpaired_train_b2; do
   src="$HF_DIR/synth/$split"
   dst="$DATA_ROOT_VTON/synth/$split"
   if [[ ! -d "$src" ]]; then
-    echo "WARN: missing $src"
+    echo "WARN: missing $src (b2 not downloaded yet on this machine? will fall back to b1-only)"
     continue
   fi
   mkdir -p "$dst"
@@ -122,8 +122,50 @@ if [[ ! -d "$VITON_DIR/train/image" && ! -d "$VITON_DIR/train" ]]; then
   exit 1
 fi
 
-echo "[$(date -Is)] [3/3] rebuild full-v2 metadata + dataset_base"
-SYNTH_DIR="$DATA_ROOT_VTON/synth/idm_unpaired_train" \
+# Build a COMBINED b1+b2 synth dir. The two batches are disjoint by garment
+# pairing — b2's batch guarantee is "no (person, garment) tuple repeated from
+# a previous batch", so out_names (format {person}__{cloth}.jpg) never collide
+# across b1/b2. Merge their manifests + symlink all images into one flat dir,
+# then convert that as the training target. Falls back to b1-only if b2 is
+# absent (an old local copy that predates the b2 upload).
+B1="$DATA_ROOT_VTON/synth/idm_unpaired_train"
+B2="$DATA_ROOT_VTON/synth/idm_unpaired_train_b2"
+COMBINED="$DATA_ROOT_VTON/synth/idm_unpaired_train_b1b2"
+rm -rf "$COMBINED"; mkdir -p "$COMBINED/images"
+if [[ -d "$B2/images" && -f "$B2/manifest.jsonl" ]]; then
+  echo "[$(date -Is)] build combined b1+b2 synth dir (disjoint pairs by batch guarantee)"
+  cat "$B1/manifest.jsonl" "$B2/manifest.jsonl" > "$COMBINED/manifest.jsonl"
+  "$PY" - <<PY
+from pathlib import Path
+b1 = Path("$B1/images"); b2 = Path("$B2/images"); dst = Path("$COMBINED/images")
+n = 0; skip = 0
+for src in (b1, b2):
+    for p in sorted(src.rglob("*")):
+        if not (p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}):
+            continue
+        link = dst / p.name
+        if link.exists() or link.is_symlink():
+            skip += 1; continue   # defensive; disjoint by guarantee
+        link.symlink_to(p.resolve()); n += 1
+print(f"combined: symlinked {n} images, skipped {skip} collisions")
+PY
+else
+  echo "[$(date -Is)] b2 absent -> convert b1-only (no merge)"
+  cp -f "$B1/manifest.jsonl" "$COMBINED/manifest.jsonl"
+  "$PY" - <<PY
+from pathlib import Path
+b1 = Path("$B1/images"); dst = Path("$COMBINED/images")
+n = 0
+for p in sorted(b1.rglob("*")):
+    if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+        (dst / p.name).symlink_to(p.resolve()); n += 1
+print(f"b1-only fallback: symlinked {n} images")
+PY
+fi
+SYNTH_FOR_CONVERT="$COMBINED"
+
+echo "[$(date -Is)] [3/3] rebuild full-v2 metadata + dataset_base (combined b1+b2)"
+SYNTH_DIR="$SYNTH_FOR_CONVERT" \
   OUT_DIR="$DATA_ROOT_VTON/converted_idm_synth_train_v2" \
   bash "$SCRIPT_DIR/run_convert_idm_v2.sh"
 

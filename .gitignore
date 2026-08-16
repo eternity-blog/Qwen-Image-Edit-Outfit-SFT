@@ -43,3 +43,6 @@ logs/
 # Mutagen / sync junk
 *.conflict
 *.tmp
+
+# wandb local run logs (probe runs write to CWD; never commit)
+wandb/
