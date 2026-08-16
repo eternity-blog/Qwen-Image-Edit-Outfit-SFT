@@ -1,7 +1,7 @@
 # 脚本索引
 
-48 个脚本按用途分组。**当前主线**用粗体标出；其余是被取代的早期版本或一次性工具，
-保留是为了留痕，日常不需要碰。
+36 个脚本按用途分组。**当前主线**用粗体标出；其余是被取代的早期版本，保留是为了留痕，日常不需要碰。
+更早的一次性编排与 VITON 重建任务线已在 2026-08-16 删除（可在 git 历史中找回）。
 
 约定：所有 shell 入口都 `source scripts/lib_env.sh`，路径来自 `configs/env.local.sh`。
 
@@ -29,7 +29,6 @@
 | `preview_idm_synth_pairs.py` | 抽样预览合成质量：人物 \| 服装 \| 合成 GT |
 | `run_idm_train_multigpu.sh` | 早期版：路径写死的 train split 合成，已被 `run_idm_synth_batch.sh` 取代 |
 | `run_idm_batch_synth.sh` | 早期版：test split 续跑 |
-| `run_idm_synth_pipeline.sh` | 早期编排：setup → 合成 → 转换 |
 
 ## 3. 数据：转 DiffSynth metadata
 
@@ -39,7 +38,6 @@
 | **`run_convert_idm_v2.sh`** | **上者的封装，附带 prompt 审计输出** |
 | `prompts_train_v2.py` | v2 prompt 构造（`prompts/outfit_v2.py` 的训练侧封装） |
 | `convert_idm_synth_to_qwen_edit.py` | v1：短英文 prompt，`idm_lora_v1` 用的就是它 |
-| `convert_vton_to_qwen_edit.py` | 最早期：VITON 重建任务（非换装），已废弃 |
 
 ## 4. 训练
 
@@ -48,11 +46,6 @@
 | **`train_full_sft_zero3.sh`** | **全参 DiT SFT，Accelerate + DeepSpeed ZeRO-3 / ZeRO-2-offload** |
 | **`train_lora_v2_multigpu.sh`** | **同数据 LoRA 对照，8 卡使步数与全参一致（1427）** |
 | `train_idm_lora_multigpu.sh` | 早期 LoRA（v1 短 prompt、4 卡），产出 `idm_lora_v1` |
-| `train_vton_lora.sh` | 最早期 VITON 重建 LoRA，已废弃 |
-| `run_vton_lora_pipeline.sh` | 上者的编排，已废弃 |
-| `bootstrap_and_train_idm.sh` | 一次性：开发机重启后重建环境并续跑 |
-| `run_after_test_then_train_multigpu.sh` | 一次性：等 test 合成完再启动 train 合成 |
-| `run_idm_train_merge_convert.sh` | 一次性：等 shard 跑完再合并转换 |
 
 ## 5. 权重后处理
 
@@ -74,10 +67,6 @@
 | `compose_idm_compare.py` | case02 拼图（`--idm-label` 指定第二个模型栏位名） |
 | `probe_editplus_truncation.py` | 验证 EditPlus 是否截断长 prompt（结论见 KNOWLEDGE） |
 | `run_case02_idm_vs_base.sh` | 短指令对照 |
-| `run_case02_fair.sh` | 早期：对齐 GPT 输入的公平对照 |
-| `run_case02_zeroshot.sh` | 早期：Stage-0 zero-shot |
-| `run_case02_fused_vs_base.sh` | 早期：fused vs base 冒烟 |
-| `compose_fused_vs_base.py` | 上者的拼图 |
 
 ## 7. 发布与记录
 
@@ -88,7 +77,6 @@
 | `upload_lora_v2_to_hf.sh` | 上传 LoRA fused 模型到 HF 子目录 |
 | `record_training_details.py` | 抓训练快照（配置/环境/数据/loss 曲线）→ JSON + Markdown |
 | `logs_to_wandb.py` | 事后把 TensorBoard 曲线补录进 wandb |
-| `upload_dataset_to_hf.py` | 早期上传脚本，已被 `upload_all_synth_to_hf.py` 取代 |
 
 ---
 

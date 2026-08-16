@@ -65,7 +65,7 @@ VITON 原图很大且有独立许可：可要求用户自行下载 VITON，你�
 huggingface-cli login
 pip install datasets huggingface_hub
 
-python scripts/upload_dataset_to_hf.py \
+python scripts/upload_all_synth_to_hf.py \
   --repo-id <your-username>/qwen-outfit-idm-synth-v2 \
   --synth-dir $QWEN_VTON_DATA/synth/idm_unpaired_train \
   --converted-dir $QWEN_VTON_DATA/converted_idm_synth_train_v2 \

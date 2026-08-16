@@ -192,7 +192,7 @@ export IDM_MODEL=$OUTPUT_ROOT/qwen_full_sft_fused   # 或 LoRA fused
 bash scripts/run_case02_v2_prompt_eval.sh
 ```
 
-须使用 **live 全文 v2 prompt**（与训练同分布）。见 [EVAL.md](EVAL.md)、[PROMPT_V2.md](PROMPT_V2.md)。
+须使用 **live 全文 v2 prompt**（与训练同分布）。见 [EVAL.md](EVAL.md)、[KNOWLEDGE.md](KNOWLEDGE.md)。
 
 ---
 
