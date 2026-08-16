@@ -238,7 +238,25 @@ LoRA 只在 13 个线性层上加了 r16 的增量。
 > 第 2 点是「MAD 低不等于更好」的活例子：没有 GT 时这个指标只能说明改动量，
 > 判好坏必须看图。见 [EVAL.md](EVAL.md#怎么读这些数字)。
 
-拼图：`outputs/case02_fullsft_0815/*_compare.jpg`
+所有配置合并成一张对照条（每 shot 一张）：
+
+```bash
+python scripts/compose_case02_matrix.py \
+  --run-root $OUTPUT_ROOT/qwen_kf_zeroshot \
+  --out-dir  $OUTPUT_ROOT/qwen_kf_zeroshot/case02_matrix
+```
+
+栏位：`源帧 | GPT(3refs) | base(3) | idm_lora_v1(3) | lora_v2_lr1e-4(3) | full_sft(3) | base(1) | full_sft(1)`，
+每格标注 MAD vs 源帧。
+
+### 2.3 一个待确认的观察：case02 上的白色偏置
+
+`full_sft` 在两个 shot 都输出**白色上衣**，而参考商品分别是黑色与蓝色套装；
+`base @ 1ref` 在 shot01 反而给出了与 GPT 一致的蓝色。
+
+但同一个 `full_sft` 在 VITON 留出集上颜色是准的（灰 T、黑船领、米色碎花都对上），
+所以**不是全局白色偏置**。更可能的原因是 case02 的商品图形态（模特实拍 / 多件套 / 复杂背景）
+与 VITON 的纯白平铺单件差异过大。样本只有 2 个，暂列为观察，需更多 case 才能定论。
 
 > **不入库**：case02 素材是业务视频帧且含真人肖像，故不随仓库分发，仅本地留档。
 
