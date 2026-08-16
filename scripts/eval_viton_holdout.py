@@ -140,19 +140,15 @@ def main() -> None:
         action="append",
         default=[],
         metavar="NAME=PATH",
-        help="full model dir; repeatable, evaluated in the given order",
-    )
-    ap.add_argument(
-        "--lora",
-        action="append",
-        default=[],
-        metavar="NAME=ADAPTER.safetensors",
-        help="LoRA adapter fused onto --lora-base in memory; repeatable",
+        help=(
+            "repeatable. PATH is either a full model dir or a LoRA .safetensors "
+            "adapter (fused onto --lora-base in memory). Panels appear in this order."
+        ),
     )
     ap.add_argument(
         "--lora-base",
         default="",
-        help="base model for --lora (defaults to the first --model, else required)",
+        help="base model for adapter entries (defaults to the first model dir given)",
     )
     ap.add_argument("--lora-scale", type=float, default=1.0)
     ap.add_argument("--out-dir", required=True)
@@ -168,28 +164,33 @@ def main() -> None:
     ap.add_argument("--facing", default="front")
     args = ap.parse_args()
 
+    # Keep CLI order: a dir and an adapter may be interleaved, and the order given
+    # is the panel order in the grids.
     models: list[tuple[str, Path, str]] = []
     for spec in args.model:
         if "=" not in spec:
             raise SystemExit(f"--model expects NAME=PATH, got {spec}")
-        name, path = spec.split("=", 1)
-        if not (Path(path) / "model_index.json").is_file():
-            raise SystemExit(f"{name}: no model_index.json under {path}")
-        models.append((name, Path(path), "dir"))
-
-    lora_base = Path(args.lora_base) if args.lora_base else (models[0][1] if models else None)
-    for spec in args.lora:
-        if "=" not in spec:
-            raise SystemExit(f"--lora expects NAME=PATH, got {spec}")
-        name, path = spec.split("=", 1)
-        if not Path(path).is_file():
-            raise SystemExit(f"{name}: adapter not found: {path}")
-        if lora_base is None or not (lora_base / "model_index.json").is_file():
-            raise SystemExit("--lora needs --lora-base pointing at a base model dir")
-        models.append((name, Path(path), "lora"))
+        name, raw = spec.split("=", 1)
+        p = Path(raw)
+        if (p / "model_index.json").is_file():
+            models.append((name, p, "dir"))
+        elif p.is_file() and p.suffix == ".safetensors":
+            models.append((name, p, "lora"))
+        else:
+            raise SystemExit(
+                f"{name}: {p} is neither a model dir (model_index.json) "
+                "nor a .safetensors adapter"
+            )
 
     if not models:
-        raise SystemExit("nothing to evaluate: pass --model and/or --lora")
+        raise SystemExit("nothing to evaluate: pass --model")
+
+    lora_base = Path(args.lora_base) if args.lora_base else None
+    if lora_base is None:
+        lora_base = next((p for _, p, k in models if k == "dir"), None)
+    if any(k == "lora" for _, _, k in models):
+        if lora_base is None or not (lora_base / "model_index.json").is_file():
+            raise SystemExit("adapter entries need --lora-base pointing at a base model dir")
 
     width, height = (int(v) for v in args.size.lower().split("x"))
     out = Path(args.out_dir)
