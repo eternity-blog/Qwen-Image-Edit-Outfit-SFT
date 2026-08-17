@@ -37,10 +37,15 @@
 
 | 轨道 | 指标 | base | **full_sft（基线）** | 标尺 |
 |---|---|---|---|---|
-| 域内 VITON-HD 留出（6 样本，768×1024，prompt 1592） | MAD vs 人物 | 35.66 | **20.04** | 18.64（teacher） |
-| | MAD vs teacher | 28.95 | **9.32** | 0 |
-| | hist corr vs teacher | 0.8717 | **0.9433** | 1.0 |
+| 域内 VITON-HD 留出（**n=200**，768×1024，prompt 1592） | MAD vs 人物 | 40.14 | **21.40** | 20.87（teacher） |
+| | MAD vs teacher | 38.95 | **8.76** | 0 |
+| | hist corr vs teacher | 0.8526 | **0.9233** | 1.0 |
+| | 单样本 stdev（MAD-t） | 20.55 | **4.24** | — |
 | 业务域 case02（2 shot，720×1280，prompt 2000/1922） | MAD shot00 | 72.77 | **32.16** | 48.04（GPT Image2） |
+
+> 域内基线已从 6 样本更新为 **n=200 正式口径**（EVAL_RESULTS 1.4 节）。
+> 6 样本的旧基线（base 28.95 / full_sft 9.32 / 标尺 18.64）**不要再引用**——
+> 那 6 条对 base 偏易，训练收益被低估约 1/3。
 
 > hist corr 数值已按统一口径（全部从落盘 JPEG 计算）更新；早期版本对新生成图用内存 PIL、
 > 对复用图用 JPEG，而 JPEG 色度下采样只损伤色度不动亮度，两组不可比。灰度 MAD 仅差 0.01。
@@ -67,7 +72,7 @@
 ## 2. 前提（不满足则 sweep 无意义）
 
 1. **先评测再扫参。** 全参已有基线评测可直接用；LoRA 必须先补基线评测。无评测 = 盲调。
-2. **多 seed 评测，否则比的是噪声。** 扩散单步噪声 ≫ 趋势：全参末 100 步单步 stdev 0.025、极差 0.10；LoRA 末 100 步 stdev 0.033、极差 0.12。单 seed 的指标差很可能落在噪声带内。**每个配置至少 3 seed（或 6 样本取 mean±std），只有差值超出噪声带才判"更好"。**
+2. **足够样本量 + 配对检验，否则比的是噪声。** 扩散单步噪声 ≫ 趋势：全参末 100 步单步 stdev 0.025、极差 0.10；LoRA 末 100 步 stdev 0.033、极差 0.12。**每个配置在 n=200 留出集上评测并做配对检验**（n=6 的 MDE≈0.46，远大于 HP 间的预期差距，注定得不出结论——此教训见 EVAL_RESULTS 1.4）。
 3. **一次一变量。** 每个新 run 只改一个旋钮，其余钉死基线，否则归因不清。
 4. **同评测协议。** 固定 `--seed 0 --steps 40`，同 6 留出 + 同 2 case02 shot，每个新 run 带上 base 作对照。
 5. **隔离输出目录。** 每 run 用 `FULL_SFT_OUT=` / `LORA_V2_OUT=` 独立目录，不覆盖基线 ckpt（否则后跑的覆盖先跑的，无法回评）。
@@ -87,7 +92,7 @@
 | A2 | 2e-5 | 同上 | 是否更快收敛 / 过拟合 | 新 run |
 | A3 | 5e-5 | 同上 | 是否毁预训练表示（灾难遗忘） | 新 run |
 
-**判据：** A1–A3 的域内 MAD-teacher 是否 < 9.31、hist-corr > 0.9380，且 case02 MAD < 32.16/26.22（超基线且超噪声带）。A3 预期 case02 崩（颜色 / 身份漂移加剧）——若如此，正是"LR 过高毁表示"的实锤。
+**判据（n=200 口径）：** A1–A3 的域内 MAD-teacher 是否 < 8.76、hist-corr > 0.9233，且 case02 MAD < 32.16/26.22（超基线且超噪声带）。**域内评测一律跑 n=200**——n=6 的 MDE≈0.46，而 HP 之间的真实差距可能只有 0.1–0.3 量级，6 样本注定得不出结论（教训见 EVAL_RESULTS 1.4）。A3 预期 case02 崩（颜色 / 身份漂移加剧）——若如此，正是"LR 过高毁表示"的实锤。
 
 ### 3.2 条件性 — num_epochs & weight_decay（已从主路径降级）
 
@@ -171,7 +176,7 @@
 
 | 步 | 脚本 | 素材 | 回答 |
 |---|---|---|---|
-| 1 域内留出 | `eval_viton_holdout.py` | VITON-HD test（训练未见）6 样本 | 该 HP 下换装能力本身 |
+| 1 域内留出 | `eval_viton_holdout.py` | VITON-HD test（训练未见）**n=200** | 该 HP 下换装能力本身 |
 | 2 业务域 | `run_case02_v2_prompt_eval.sh` | case02 2 shot + GPT 参照 | 该 HP 下真实帧能不能用 |
 | 3 可视化 | `visualize_metrics.py` | 评测目录 | 差异分布在哪 |
 
@@ -224,7 +229,7 @@ P3/P5 不在主路径：前者受数据瓶颈主导、非 HP 能解；后者要�
 
 HP sweep 优化的是**域内拟合上限**与**方法本身的样本效率**。但 EVAL_RESULTS 已显示 case02 崩的病因是**域差 / 数据多样性坍缩**（1 条 prompt、仅正面上装、无真实帧），不是 HP。所以：
 
-- HP sweep **可能**让域内 MAD-teacher 从 9.31 再降一点、case02 略改善；
+- HP sweep **可能**让域内 MAD-teacher 从 8.76（n=200）再降一点、case02 略改善；
 - HP sweep **不会**修掉 case02 的颜色错 / 字幕崩 / 身份漂移——那需要 DATA_SCALING_PLAN 的真实帧 + GPT teacher + DressCode 多类目；
 - 正确排序：**先 HP sweep 把现有数据榨到最优（定基线 config），再加数据看增益归因到数据而非 HP。**
 
@@ -245,14 +250,12 @@ FULL_SFT_OUT=$OUTPUT_ROOT/hp_sweep/A1_lr5e6 LR=5e-6 bash scripts/train_full_sft_
   --base-model "$MODEL_DIR" \
   --ckpt "$OUTPUT_ROOT/hp_sweep/A1_lr5e6/dit_full/epoch-0.safetensors" \
   --out-dir "$OUTPUT_ROOT/hp_sweep/A1_lr5e6_fused"
-# 评测（3 seed，带 base + 基线对照）
-for s in 0 1 2; do
-  "$ENV_DIR/bin/python" scripts/eval_viton_holdout.py \
-    --model base="$MODEL_DIR" \
-    --model lr5e6="$OUTPUT_ROOT/hp_sweep/A1_lr5e6_fused" \
-    --model baseline="$OUTPUT_ROOT/qwen_full_sft_fused" \
-    --out-dir "$OUTPUT_ROOT/hp_sweep/A1_eval_s$s" --n 6 --steps 40 --seed $s
-done
+# 评测（n=200 正式口径，带 base + 基线对照；约 7h/模型）
+"$ENV_DIR/bin/python" scripts/eval_viton_holdout.py \
+  --model base="$MODEL_DIR" \
+  --model lr5e6="$OUTPUT_ROOT/hp_sweep/A1_lr5e6_fused" \
+  --model baseline="$OUTPUT_ROOT/qwen_full_sft_fused" \
+  --out-dir "$OUTPUT_ROOT/hp_sweep/A1_eval_n200" --n 200 --steps 40 --seed 0
 ```
 
 LoRA sweep 同理：`LORA_V2_OUT=$OUTPUT_ROOT/hp_sweep/E1_rank8 LORA_RANK=8 bash scripts/train_lora_v2_multigpu.sh`（脚本自带 fuse 到该目录的 `fused/`）。**注意：不要单独扫 `LORA_SCALE`——它与 LR 数学等价，已被 LR sweep 覆盖。**
