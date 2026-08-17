@@ -47,8 +47,18 @@ def main() -> None:
     ref = args.reference
     if ref not in res:
         raise SystemExit(f"reference {ref} not in metrics")
-    print(f"\npaired vs {ref}  (negative = the other model is closer to the teacher)")
-    print(f"  n = {len(ids)} samples; |t| > 2.57 is p<0.05 two-sided at df=5")
+    # MAD is a distance (lower is better); histogram correlation is a similarity
+    # (higher is better), so the sign of "better" flips between them.
+    higher_is_better = "hist" in args.metric
+    direction = (
+        "positive = the other model is closer to the teacher"
+        if higher_is_better
+        else "negative = the other model is closer to the teacher"
+    )
+    df = len(ids) - 1
+    crit = 2.57 if df <= 5 else (2.09 if df <= 20 else 1.97)
+    print(f"\npaired vs {ref}  ({direction})")
+    print(f"  n = {len(ids)} samples, df = {df}; |t| > {crit} is p<0.05 two-sided")
     for n in names:
         if n == ref or n in excl:
             continue
@@ -57,13 +67,17 @@ def main() -> None:
         sd = st.stdev(d)
         se = sd / len(d) ** 0.5
         t = mean_d / se if se else float("inf")
-        if abs(t) > 2.57:
-            verdict = "significant"
-        elif abs(t) > 2.0:
+        if abs(t) > crit:
+            better = (mean_d > 0) if higher_is_better else (mean_d < 0)
+            verdict = f"significant, {n} is {'better' if better else 'worse'}"
+        elif abs(t) > crit * 0.78:
             verdict = "marginal"
         else:
             verdict = "not distinguishable from noise"
-        print(f"  {n:<16s} delta={mean_d:+6.2f}  sd={sd:5.2f}  se={se:5.2f}  t={t:+6.2f}  {verdict}")
+        print(
+            f"  {n:<16s} delta={mean_d:+7.3f}  sd={sd:5.2f}  se={se:5.3f}"
+            f"  t={t:+6.2f}  {verdict}"
+        )
 
 
 if __name__ == "__main__":

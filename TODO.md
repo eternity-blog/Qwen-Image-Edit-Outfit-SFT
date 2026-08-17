@@ -10,7 +10,8 @@
 - [x] 8 卡全参 SFT 跑通并上传模型（`lee31221/Qwen-Image-Edit-Outfit-2511-SFT`）  
 - [x] 双轨评测：VITON 留出集 + case02 业务域（见 EVAL_RESULTS_20260815.md）  
 - [x] 数据缺口诊断与扩充方案（DATA_SCALING_PLAN.md）  
-- [x] 同数据 LoRA 对照 + LR 扫描（4 个 LR 点，配对检验：域内 r16 LoRA 与全参打平）  
+- [x] 同数据 LoRA 对照 + LR 扫描（4 个 LR 点）  
+- [x] **200 样本复现**：推翻 6 样本的「LoRA 与全参打平」，全参在 MAD 上显著更优但 LoRA 拿到 98.9% 收益  
 - [x] case02 业务域补齐 LoRA 列 + 参考图数量对照（定位崩溃主因是多参考输入）  
 - [x] batch2 合成 11 647 条并发布 HF（与 batch1 零重复）  
 - [x] b1+b2 合并数据全参 SFT（22 829 条 / 2854 步 / 4h41m，见 FULL_SFT_B1B2_RUN）  
@@ -19,6 +20,10 @@
 - [x] 仓库清理：合并可视化脚本、删除死配置、修 `record_training_details.py`  
 
 ## Next
+
+- [ ] 用 IDM-VTON 在真实业务帧上跑换装，检查其前置产物（parsing / densepose / mask）是否可用——
+      验证「真实帧的 teacher 必须换成 GPT」这一判断  
+- [ ] 业务域样本量仅 2 shot，结论强度远弱于域内；需扩充 case 或明确标注其证据等级  
 
 - [ ] 补交 `scripts/launch_full_sft_observable.sh`：FULL_SFT_B1B2_RUN 第 6 节称其"封装成可复用"，但该文件只在训练机上、未进仓库  
 - [ ] **多参考训练数据**：随机化 `n_product_refs ∈ {1,2,3}`（P0，已证实是业务域最大单点故障）  
