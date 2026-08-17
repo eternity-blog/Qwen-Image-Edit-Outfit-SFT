@@ -290,6 +290,66 @@ $$s = \sqrt{\frac{P_{\max}}{W \times H}}, \quad (W', H') = (\text{round}_{k}(sW)
 **不截断也不切片**，约 2000 字符可全文进入模型。所以质量问题的主因是
 **短训长推的域差**，不是截断。
 
+### 3.6 【源码】Loss 到底怎么算（`FlowMatchSFTLoss` 逐行拆解）
+
+训练循环的调用链：`runner.py` 的 `for data in dataloader` →
+`model(data)` → `diffsynth/diffusion/loss.py: FlowMatchSFTLoss`。核心就这几行：
+
+```python
+timestep_id = torch.randint(min_b, max_b, (1,))            # ① 均匀采一个时间步
+timestep    = pipe.scheduler.timesteps[timestep_id]
+noise       = torch.randn_like(input_latents)               # ② 标准高斯噪声
+latents     = scheduler.add_noise(input_latents, noise, t)  # ③ x_t = (1-σ)x₀ + σε
+target      = scheduler.training_target(input_latents, noise, t)   # ④ target = ε − x₀
+noise_pred  = pipe.model_fn(**models, **inputs, timestep=t) # ⑤ DiT 前向（带条件）
+loss = F.mse_loss(noise_pred.float(), target.float())       # ⑥ fp32 里算 MSE
+loss = loss * scheduler.training_weight(timestep)           # ⑦ 按时间步加权
+```
+
+逐条展开：
+
+**① timestep 采样：均匀，不是 logit-normal。**
+训练启动时 `set_timesteps(1000, training=True)` 建一个 1000 点的 σ 网格，
+每步 `randint` 均匀取一个格点。SD3 论文用的 logit-normal 采样（中段概率大）
+在这里**没有用**——中段偏重是靠 ⑦ 的权重实现的，不是靠采样分布。
+另外整个 micro-batch 共享同一个 t（shape `(1,)`）。
+
+**①′ 一个真实的训练-推理不对称（读源码发现的）**：
+Qwen-Image 模板的 σ 网格带 exponential shift，μ 由 `dynamic_shift_len` 决定。
+**训练时没传这个参数 → μ 固定 0.8**；推理时按 `(h//16)×(w//16)` 动态算
+（768×1024 → μ≈0.64）。即训练与推理的噪声 schedule 有轻微错位。
+影响未测量（底座预训练大概率同源，所以微调沿用没出问题），
+但被问"训练推理完全一致吗"时，这是个能展示源码功力的诚实答案。
+
+**③④ 线性插值 + 速度目标。** $x_t=(1-\sigma)x_0+\sigma\epsilon$，
+目标是常速度场 $\epsilon - x_0$（从数据指向噪声）。这两行就是第 1.3 节
+Flow Matching 数学的全部代码实现——面试写得出这两行，比背公式有说服力。
+
+**⑤ 条件从哪进**：`model_fn` 里条件图 latent 拼进序列；`zero_cond_t=True` 时
+`timestep = cat([t, t*0])` 并用 `modulate_index` 标记主图 token（取 t）与
+条件图 token（取 0）——这就是 3.2 节说的"条件图不在加噪轨迹上"的具体实现。
+
+**⑥ 为什么显式 `.float()`**：bf16 只有 7 位尾数，直接在 bf16 里做平方差，
+小残差会被舍入吞掉。前向 bf16、**loss 在 fp32 里算**是混合精度的标准细节。
+
+**⑦ 时间步加权**：`training_weight(t)` 查 `linear_timesteps_weights` 表，
+对中段时间步加权（两端的任务要么太易要么信息少）。
+确切公式在 `set_training_weight`（待从训练机源码补录精确表达式）。
+
+**同一批源码里确认的四个"没有"**（都可能被问）：
+
+| 项 | 实况 | 含义 |
+|---|---|---|
+| **梯度裁剪** | **没有**——runner 无 `clip_grad_norm_`，accelerate/deepspeed 配置也没配 `gradient_clipping` | loss 偶发尖峰（实测 max 0.17）直接进梯度；靠小 LR（1e-5）扛 |
+| **EMA** | 没有 | 存的就是在线权重，没有影子平均 |
+| **condition dropout** | 没有——SFT 不随机丢文本/条件图 | 推理 CFG 的无条件分支**沿用底座预训练的能力**，微调没有显式训练空条件输入 |
+| **可调 batch** | 没有——`collate_fn=lambda x: x[0]` **硬编码每卡 batch=1** | "有效 batch 8"完全来自 8 卡数据并行；想加 batch 只能加 grad_accum 或加卡 |
+
+**推理侧对应**：同一个 σ 网格上做 Euler 积分（`step()`：
+$x_{t-1} = x_t + (\sigma_{t-1}-\sigma_t)\,v_\theta$），40 步、
+`true_cfg_scale=4.0`、**negative prompt 为空串**（`" "`）——
+即 CFG 的"无条件"分支实际是"空文本条件"分支。
+
 ---
 
 ## 4. 蒸馏：这里到底"蒸馏"了什么
@@ -394,7 +454,8 @@ $$W' = W + \frac{\alpha}{r} BA, \quad B \in \mathbb{R}^{d\times r},\ A \in \math
 真实差距 0.34，正好落在盲区。这两件事被混为一谈是最常见的实验解读错误。
 
 附带：base 在 6 样本上 MAD 28.95、200 样本上 38.95——那 6 条对未训练模型偏易，
-把"训练收益"低估了三分之一。**所有跨样本量的数字都必须标注 n**。
+把"训练收益"低估了三分之一。连刻度也变了（18.64 → 20.87）。
+**所有跨样本量的数字都必须标注 n；本仓库结论一律以 n=200 为准。**
 
 ---
 
@@ -917,12 +978,31 @@ $$d(H_1,H_2)=\frac{\sum_i (H_1(i)-\bar{H_1})(H_2(i)-\bar{H_2})}{\sqrt{\sum_i (H_
 | MAD vs person | 模型**改了多少**（改动量） |
 | MAD vs teacher | 模型**离目标多远**（正确性） |
 
-单看任一列都会被骗。**`MAD(person, teacher)` 是刻度**（本项目 6 样本上是 18.64）：
+单看任一列都会被骗。**`MAD(person, teacher)` 是刻度**（**n=200 上是 20.87**）：
 它是"一次正确换装必然产生的改动量"，同时是第二列的**及格线**——
 因为模型只要原样输出源图就能拿到这个分。**得分高于它，等于比交白卷还差。**
 
-**【实验】** base 在 6 样本上改动量 35.65（≈刻度两倍，改太多）、距 teacher 28.95（>18.64，
-比什么都不做还远）→ 在改错的东西。
+**【实验】n=200 主表**（seed 0 / 40 步 / 768×1024）：
+
+| 模型 | MAD vs person | MAD vs teacher | 单样本 stdev | hist corr |
+|---|---|---|---|---|
+| *刻度：teacher vs person* | *20.87* | *0* | *12.26* | *1.0* |
+| base | 40.14 | 38.95 | 20.55 | 0.8526 |
+| lora_v2_lr1e-4 | 21.58 | 9.10 | 4.09 | **0.9334** |
+| **full_sft_b1** | **21.40** | **8.76** | 4.24 | 0.9233 |
+| full_sft_b1b2 | 21.59 | 8.92 | 4.16 | 0.9118 |
+
+**三句话读完这张表**：
+
+1. **base 在改错东西**——改动量 40.14 ≈ 刻度的 1.9 倍（改太多），
+   且距 teacher 38.95 **> 刻度 20.87**，即**比原样输出源图还远**。
+2. **训练后改动量精准落在刻度上**——21.40–21.59 vs 刻度 20.87，差不到 4%。
+3. **且不是靠少改动刷分**——距 teacher 只有 8.76–9.10，远低于 20.87 的及格线。
+
+**训练收益的配对检验（vs base，n=200）**：MAD vs teacher 三个模型
+Δ ≈ −30（t ≈ −21，p < 1e-52），Wilcoxon 交叉验证同向（p < 1.5e-34）。
+这是本项目**唯一量级巨大、毫无争议**的结论——
+相比之下 LoRA 与全参之间那 0.34 的差距只是它的 1.1%。
 
 ### 9.5 没有 GT 时的陷阱
 
@@ -968,9 +1048,10 @@ base 连人脸都在发亮（身份被改），训练后的模型大面积深蓝
 **所以训练的收益其实是两层**：均值从 38.95 降到 8.76（**准确性**），
 同时波动收窄 4.9 倍（**可靠性**）。第二层往往被忽略，但对落地更关键。
 
-**【实验】** n=6 时也观察到同一现象（base stdev 10.90 → full_sft 1.52），
-但注意**两个样本量下的 stdev 不可直接比较**（n=6 的 stdev 本身估计极不稳），
-引用时必须标注 n=200。
+**注意**：早期 6 样本上也观察到同一现象（base stdev 10.90 → full_sft 1.52），
+但**两个样本量下的 stdev 不可直接比较**——n=6 的 stdev 本身估计极不稳
+（当时算出的收窄倍数是 7.2×，与 n=200 的 4.9× 相差甚远）。
+**引用一律用 n=200 的 4.9×。**
 
 ### 9.8 【实验】留出集构造与可复现性
 
@@ -1258,6 +1339,35 @@ $s_d\approx0.4$ 时 n=6 的 MDE 是 0.46、n=200 是 0.079。真实差距 0.34 �
 不知道它绝对正确——它就是天花板。`MAD vs teacher` 衡量"像不像 teacher"。
 所以我同时看业务域（有 GPT 作参照）和肉眼检查，不只依赖单一指标。
 
+**Q：Loss 具体怎么算的？**
+每步均匀采一个时间步 t，标准高斯噪声按 $x_t=(1-\sigma)x_0+\sigma\epsilon$ 混进目标图 latent，
+DiT 在全部条件下预测速度，与真实速度 $\epsilon-x_0$ 做 **MSE（显式转 fp32 算）**，
+再乘一个按时间步查表的权重。就是 `FlowMatchSFTLoss` 里的七行代码。
+
+**Q：timestep 是怎么采样的？**
+在 1000 点的 shifted σ 网格上**均匀** `randint`——不是 SD3 的 logit-normal。
+中段偏重靠 loss 的时间步权重实现，不靠采样分布。整个 micro-batch 共享同一个 t。
+
+**Q：为什么 loss 要转 fp32 再算？**
+bf16 尾数只有 7 位，微调后期残差很小，在 bf16 里做平方差会被舍入吞掉。
+前向 bf16、loss fp32 是混合精度标准做法。
+
+**Q：训练用梯度裁剪 / EMA 了吗？**
+都没有（runner 循环和 accelerate/deepspeed 配置里都查过）。loss 尖峰（实测 max 0.17）
+直接进梯度，靠 1e-5 的小 LR 扛住；没有 EMA，存的就是在线权重。
+如果重训我会考虑加 `gradient_clipping: 1.0`——LR 扫描里 5e-4 的尖峰崩掉就是没裁剪的代价。
+
+**Q：训练时没做 condition dropout，推理 CFG 为什么还能用？**
+SFT 确实没随机丢条件，无条件分支没被显式训练。CFG 还能用是因为
+①底座预训练时训过无条件路径，微调只是让有条件路径偏向换装；
+②我们的 negative prompt 是空串，"无条件"分支实际是"空文本"分支，
+它主要靠底座能力。这也是为什么 `true_cfg_scale` 不敢开太高——微调没维护过那条路径。
+
+**Q：单卡 batch 为什么是 1？**
+框架层面硬编码：dataloader 的 `collate_fn=lambda x: x[0]` 每次只取一条。
+1MP 分辨率下激活也大，batch=1 + 8 卡数据并行是合理配置；
+要加有效 batch 只能加 grad_accum 或加卡。
+
 **Q：训练 loss 降了多少？**
 窗口均值 0.0409 → 0.0311（−23.7%）。但我要强调**这个数不能用来选模型**——
 last100 单步 stdev 0.029 比整体降幅还大，LR 扫描里 loss 最好看的配置评测反而最差。
@@ -1397,6 +1507,9 @@ P0 是多参考训练数据（训练时随机化 `n_product_refs ∈ {1,2,3}`，
 | 「LoRA 省显存」 | 省的是优化器状态；DDP 下**整模仍每卡一份** |
 | 「数据越多越好」 | 多样性不变时堆数量收益为零（实测） |
 | 「换个分辨率没影响」 | `use_dynamic_shifting` 让噪声 schedule 随 token 数变，分辨率同时改了噪声分布 |
+| 「timestep 是 logit-normal 采样」 | 这套代码是**均匀采样** + 时间步权重，别照搬 SD3 论文 |
+| 「训练一定有梯度裁剪兜底」 | 实查没有；5e-4 那次崩尖峰就是代价 |
+| 「CFG 需要训练时 condition dropout」 | SFT 没做；无条件分支沿用底座预训练能力 |
 | 「这套能直接上线」 | 数据是 CC BY-NC，只能验证方法；且多参考图仍会崩 |
 | 「我搭了训练框架」 | 框架是 DiffSynth-Studio 的；我做的是数据、对照实验与评测 |
 
