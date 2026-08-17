@@ -408,7 +408,90 @@ A100/H100 都有原生支持。
 是良性的——本项目用的是模型层的 GC（`--use_gradient_checkpointing`），
 不是 DeepSpeed 自己的 activation checkpointing wrapper，两套机制独立。
 
-### 7.3 【实验】权重嫁接（DiT-only ckpt → 完整模型目录）
+### 7.3 【实验】CPU Offload：两套机制，别混
+
+项目里"offload"出现在两个完全不同的位置，面试被问到时必须先区分。
+
+#### (a) 训练侧：ZeRO-Offload —— 备好了但没启用
+
+**【配置】** `configs/accelerate_zero3.yaml`（实际使用）：
+
+```yaml
+zero_stage: 3
+offload_optimizer_device: none     # ← 没开
+offload_param_device: none         # ← 没开
+zero3_init_flag: true
+zero3_save_16bit_model: true
+num_processes: 8
+mixed_precision: bf16
+```
+
+**【配置】** `configs/accelerate_zero2_offload.yaml`（fallback，`DS_PROFILE=zero2_offload`）：
+
+```yaml
+zero_stage: 2
+offload_optimizer_device: 'cpu'    # ← 优化器状态搬到 CPU
+offload_param_device: 'cpu'
+num_processes: 4
+```
+
+**【实验】三次训练跑的都是 zero3 无 offload**（三份 run report 里都记为「无 param/optimizer offload」）。
+
+**为什么不开**：8 卡分片后实测峰值 74.8/80GB，够用。ZeRO-Offload 把优化器状态搬到 CPU 后，
+每步都要走 PCIe 来回搬运 + 在 CPU 上执行 Adam 更新，通常慢 2–4 倍。
+**显存够就别开——它是救命手段，不是优化手段。**
+
+fallback 存在的意义是卡不够时（4 卡）还能跑：优化器状态 245GiB 是最大头，
+搬到 CPU 后 GPU 侧压力骤降。
+
+> 一处配置冗余：`zero_stage: 2` 时 DeepSpeed 只认 `offload_optimizer`，
+> **`offload_param` 在 ZeRO-2 下不生效**（ZeRO-2 本身不分片参数）。那行是无害的多余项。
+
+#### (b) 【配置】两个容易被忽略的 ZeRO-3 flag
+
+| flag | 作用 |
+|---|---|
+| `zero3_init_flag: true` | **模型初始化时就分片**。否则每张卡要先完整实例化 20.43B 模型再切分，光 init 就 OOM |
+| `zero3_save_16bit_model: true` | 存 ckpt 时把分片参数 **all-gather 回完整 bf16 权重** |
+
+第二个 flag 直接决定了下游：正因为它，才能拿到那个 1933 tensor 的完整 DiT 权重文件，
+第 7.4 节的权重嫁接才有可能。**若关掉，存出的是一堆分片，得先跑
+`zero_to_fp32.py` 才能用。**
+
+#### (c) 推理/评测侧：diffusers model CPU offload —— 实际大量使用
+
+**【实验】** `zero_shot_compare.py` 里 `pipe.enable_model_cpu_offload()`，
+评测脚本通过 `--cpu-offload` / `CPU_OFFLOAD=1` 开启，**这个是常态开着的**。
+
+**为什么必须开**：模型三件套 bf16 合计 57.7GB。评测跑在**共享卡**上，
+常拿不到一整张空的 80GB，别的租户占掉一部分就 OOM。
+
+**为什么它对扩散 pipeline 特别划算**：pipeline 的阶段是**严格顺序**的——
+
+```
+Text Encoder 编码 → 编完就不再需要
+      ↓
+DiT 迭代去噪（占大部分时间）
+      ↓
+VAE 解码 → 只在最后一步用
+```
+
+三个组件**从不需要同时在显存里**。所以按模块搬进搬出，峰值从 57.7GB
+降到约等于最大单个组件（DiT 40.86GB），而搬运只发生在阶段切换时，
+**不在去噪循环内部**——开销几乎可忽略。这和训练侧 offload 每步都搬完全不同。
+
+#### (d) offload 的三种粒度
+
+| 方式 | 粒度 | 代价 |
+|---|---|---|
+| `enable_model_cpu_offload()` | 组件级（TE / DiT / VAE） | 很小（本项目用这个） |
+| `enable_sequential_cpu_offload()` | 子模块级，逐层搬 | 省得多，但**慢数倍** |
+| ZeRO-Offload（训练） | 优化器状态 / 参数 | 每步搬运，慢 2–4× |
+
+追问「还能更省吗」→ 换 sequential 能再降一档，代价是速度；
+再往下就是降分辨率（`MAX_PIXELS`）或减采样步数。
+
+### 7.4 【实验】权重嫁接（DiT-only ckpt → 完整模型目录）
 
 全参训练只训 DiT，DiffSynth 存出的 `epoch-0.safetensors` **只含 DiT 的 1933 个 tensor**，
 key 是裸模块名。它**不能当模型目录加载**，因为缺 text_encoder / VAE / tokenizer / processor /
@@ -426,7 +509,7 @@ key 是裸模块名。它**不能当模型目录加载**，因为缺 text_encode
 且 `img_in.bias` 的 sum 从 219.20（base）变成 219.08（fused）——**确认权重真的换了**。
 这一步很容易"看起来成功但其实没生效"，必须验数值。
 
-### 7.4 【实验】同优化步数为什么重要
+### 7.5 【实验】同优化步数为什么重要
 
 $$\text{优化步数} = \left\lceil \frac{\text{样本数}}{\text{单卡 batch} \times \text{卡数} \times \text{grad\_accum}} \right\rceil \times \text{epochs}$$
 
@@ -442,7 +525,7 @@ $$\text{优化步数} = \left\lceil \frac{\text{样本数}}{\text{单卡 batch} 
 **常见陷阱**：只记得"用同一份数据"，但换卡数、改 grad_accum、或数据量变了却沿用原步数，
 都会悄悄引入第二个变量。
 
-### 7.5 【实验】LR 调度器
+### 7.6 【实验】LR 调度器
 
 DiffSynth 用的是 `ConstantLR`（`runner.py`），默认 `factor≈1/3`、`total_iters=5` ——
 即前 5 步半速热身，之后恒定。**不是 cosine/linear decay，也不绑 epoch 数**。
@@ -611,6 +694,26 @@ b2 补的是**配对多样性**（同一批人物×服装重新搭配），人�
 **Q：显存怎么算的？**
 bf16 权重 = 参数量 × 2B；fp32 梯度 = 可训参数 × 4B；AdamW = 可训参数 × 8B（m+v）。
 ZeRO-3 下三者各除以卡数，再加激活（GC 压着）。口算：bf16 下「参数量(B) × 2 ≈ GiB」。
+
+**Q：你用了 CPU offload 吗？**
+要分两侧。**训练侧准备了但没启用**——8 卡 ZeRO-3 实测 74.8/80GB 够用，
+`offload_optimizer_device: none`；只在 4 卡 fallback 里配了 ZeRO-2 + optimizer offload。
+**推理评测侧是常态开着的**，因为评测跑在共享卡上，模型三件套 bf16 共 57.7GB 拿不到整卡。
+
+**Q：显存够为什么不开 offload？**
+它是救命手段不是优化手段。优化器状态搬到 CPU 后每步都要走 PCIe 来回 + 在 CPU 上跑 Adam，
+通常慢 2–4 倍。显存够时开它纯亏。
+
+**Q：为什么推理侧开 offload 几乎不损速度？**
+扩散 pipeline 阶段严格顺序：TE 编码完就不再需要 → DiT 去噪（占绝大部分时间）→ VAE 只在最后解码。
+三者从不需要同时在显存里，所以组件搬运只发生在**阶段切换**时，
+**不在去噪循环内部**。这和训练侧每步都搬完全不同。
+
+**Q：ZeRO-3 存 checkpoint 有什么坑？**
+默认存出的是分片，得跑 `zero_to_fp32.py` 才能用。本项目开了
+`zero3_save_16bit_model: true`，存盘时 all-gather 回完整 bf16 权重，
+才拿到那个 1933 tensor 的 DiT 文件。另外 `zero3_init_flag: true` 也必须开——
+否则每卡要先完整实例化 20.43B 再分片，**光 init 就 OOM**。
 
 **Q：数据量翻倍要不要加显存？**
 不要。ZeRO-3 占用由参数量和 batch 决定，与样本总数无关。翻倍只让步数翻倍，
