@@ -61,6 +61,7 @@
 | **`eval_viton_holdout.py`** | **域内留出集评测（有 GT）；`--model` 同时接受模型目录与适配器文件** |
 | **`run_case02_v2_prompt_eval.sh`** | **业务域评测，live v2 prompt + GPT 参照** |
 | **`paired_eval_stats.py`** | **配对检验：判断评测差异是真实还是噪声** |
+| **`check_paired_assumptions.py`** | **检验配对差值的正态假设，并用 Wilcoxon 做稳健性交叉验证**（需 scipy） |
 | **`visualize_metrics.py`** | **指标可视化：差分热力图 + H-S 直方图 + 差异 CDF** |
 | **`compose_case02_matrix.py`** | **把散落各目录的 case02 结果合成一张对照条** |
 | `zero_shot_compare.py` | 业务域推理核心（被 case02 脚本调用） |
