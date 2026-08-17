@@ -269,18 +269,35 @@ $$s = \sqrt{\frac{P_{\max}}{W \times H}}, \quad (W', H') = (\text{round}_{k}(sW)
 
 ### 3.5 长指令（1592 字符）里装了什么
 
-结构大致是：
+模板在 `prompts/outfit_v2.py`（从生产管线原样搬来，未压缩）。真实结构是**七个功能块**，
+其中几块还带条件分支：
 
-```
-【输入图片】图1：源视频真实帧 / 图2：商品图        ← 显式声明每张图的角色
-【任务】把图1 中人物所穿上衣替换为图2 的款式       ← 主任务
-【必须保持】背景、姿势、机位、面部身份、光照        ← locality 约束（最关键）
-【不要处理】字幕/水印                            ← teacher 约定对齐（见 8.3）
-【输出要求】分辨率、构图                          ← 格式约束
-```
+| 块 | 内容 | 作用 |
+|---|---|---|
+| 【输入图片】 | 逐张声明角色：图1=构图/姿态/光线基准，图2=商品唯一真值，其余=补充参考 | 消除多图歧义 |
+| 【编辑任务】 | 主任务 + 商品名称 + 「主商品图视觉事实」（≤1200 字符） | 任务定义 |
+| 【当前帧朝向】 | **front/back/side 三个条件分支**：背面帧要求正面 Logo 完全不可见、背面未知则保持素净 | 视角一致性 |
+| 【商品真值与还原】 | 图2 硬锁定为颜色/图案/Logo 唯一真值；商品卡背景不算商品；套装必须逐件替换 | 商品保真 |
+| 【Logo 正反面硬约束】 | 每个 Logo 按「部件+正反面+人物自身左右」锁定，禁止镜像/换边/移位；旧图案位置不得当模板 | 防最常见失效 |
+| 【人物保持】+【整体保持】 | 身份、五官、姿势、背景、机位、光照全部枚举 | locality 约束 |
+| 【花字/字幕/水印】 | 商品爆点花字（替换/禁止生成两分支）与底部字幕（移除）**显式区分** | teacher 约定对齐（见 8.3） |
+
+另有两个训练没用到的自由度：`is_tail`（尾帧对齐同镜首帧的身份与光影、但不复制姿势——
+视频管线里首尾帧一致性靠它）和 `overlay_placement`（花字原位替换或上移）。
+
+**卖点文案是确定性正则提取的，不是 LLM 生成的**（`product_selling_point_from_text`：
+按「核心卖点/材质/版型」等标签行匹配、切片、拼到 ≤30 字符）。选正则不选 LLM：
+可复现、零成本、无幻觉——给几万条训练样本造 prompt 时这三点都重要。
 
 **为什么要这么长**：locality 在指令式模型里**没有架构保证**（对比 IDM-VTON 的 mask，
 见 4.2），只能靠自然语言反复约束。「必须保持」那一段就是在用文本补回 mask 的作用。
+
+**训练数据怎么实例化这个模板**（`convert_idm_synth_to_qwen_edit_v2.py`）——
+一个必须诚实交代的点：全部 11,415 条样本用**同一组参数**实例化
+（category=upper、facing=front、overlay=none、n_refs=1、product_text 用默认模板），
+所以**每条样本的 prompt 是同一个字符串**（1592 字符）。
+「prompt 多样性坍缩」不是抽象描述，是字面事实。模板支持的 back/side/尾帧/多参考/花字
+分支训练时全都没激活——业务域崩掉的恰恰是这些没见过的维度。
 
 **为什么训练必须用同样的长指令**：推理时用长指令，训练时用短指令，
 模型就没学过"这么长的约束该怎么执行"。**指令分布必须对齐**——
@@ -415,6 +432,30 @@ VITON 数据里同 id 的 (person, cloth) 是「这个人本来穿的那件衣�
 所以评测里的 `MAD vs teacher` 衡量的是「像不像 teacher」，不是「像不像理想答案」。
 
 主动说出这个边界是加分项。
+
+### 4.5 teacher（IDM-VTON）内部长什么样（`synthesize_unpaired_idm.py` 实载的组件）
+
+被问「teacher 具体是什么结构」时不能只说"一个 try-on 模型"。它是 **SDXL inpainting
+底座 + 双 UNet + IP-Adapter** 的组合，合成脚本里逐个加载了 7 个组件：
+
+| 组件 | 作用 |
+|---|---|
+| `unet`（TryonNet） | 主 UNet，SDXL **inpainting** 变体：输入 = 加噪 latent + **agnostic mask** + 被抹掉服装的人物图 latent + **DensePose** 姿态图 |
+| `unet_encoder`（GarmentNet） | **第二个 UNet**，只跑平铺服装图，把每层的中间特征通过 attention 注入 TryonNet——这是"参考图控制"的低层通路 |
+| `image_encoder`（CLIP vision） | IP-Adapter 路线：服装的高层语义特征（款式/类目），与 GarmentNet 的低层纹理特征互补 |
+| `text_encoder` ×2 + tokenizer ×2 | SDXL 标配双文本编码器（CLIP-L + OpenCLIP-bigG），但 caption 是**写死的英文短句**（"model is wearing a upper body garment"）——**teacher 根本不接受真实指令** |
+| `vae` + DDPM scheduler | SDXL 的 latent 空间与噪声调度 |
+
+**和学生的对照读法**：teacher 用 mask + 姿态图从**架构层**锁定"只画服装区域"、
+用双 UNet + IP-Adapter 从**架构层**锁定"参考这件衣服"；学生把这两个架构保证
+全部换成了自然语言约束（3.5 节那 1592 字符）。所以蒸馏传递的不是权重而是**行为**，
+而行为的"安全性"从结构保证降级成了统计倾向——这是 4.2 节结论的机制层解释。
+
+**合成配置**（会被问"teacher 怎么跑的"）：fp16、**30 步** DDPM、guidance 2.0、
+768×1024、seed=42+shard_id。步数与学生评测的 40 步不同是正常的——
+teacher 是离线一次性跑，各用各的常用配置；学生评测在自己的模型间保持一致即可。
+mask/densepose 用 VITON-HD **预计算产物**，没有在线跑 parsing——
+这正是 4.2 说"真实帧上前置链会断"而实验里感受不到的原因：数据集把难的部分做完了。
 
 ---
 
@@ -838,6 +879,16 @@ GC 重算两边都有，净结果 LoRA 仍快。
 **产物体积差 180×**（226MB vs 40.86GB）是 LoRA 在工程上的最大优势——
 多任务时可以只存多份适配器共享一个底座。
 
+**一个真实踩过的跨框架坑**（`fuse_qwen_edit_lora.py`）：DiffSynth 存的 LoRA key 是
+`pipe.dit.blocks.*.lora_A.default.weight`，而 diffusers 的加载器要求
+`transformer.blocks.*.lora_A.weight`——**前缀和 PEFT 的 `default` 适配器名都对不上**，
+直接 `load_lora_weights` 会失败。解法是 state_dict 逐 key 重映射后再走
+`fuse_lora(lora_scale=1.0)` + `save_pretrained`。
+
+**为什么评测前一定先 fuse 而不是挂运行时 adapter**：fuse 后所有被评模型
+（base / LoRA / 全参）走**完全相同的加载与推理代码路径**，公平性无需论证；
+否则"LoRA 是否慢/是否数值不同"会混进对比里。部署侧同理——fuse 后零额外推理开销。
+
 ### 7.12 跑 2 个 epoch 会更好吗（高频追问）
 
 分三层答：
@@ -852,6 +903,25 @@ GC 重算两边都有，净结果 LoRA 仍快。
 
 **结论**：瓶颈是数据的量与多样性，不是 epoch 数。加新 pair 比加 epoch 值得——
 但要加**实体多样性**，不是配对排列（见 8.2 的阴性结果）。
+
+### 7.13 训练可观测性与环境工程（被问"你怎么监控训练"时的实话）
+
+**loss 从哪来**：DiffSynth 的训练循环用 tqdm 驱动、loss 只经 `ModelLogger` 流出——
+**文本日志里根本没有 loss**。必须开 `--enable_tensorboard_log`（启动脚本里默认开），
+loss 落到 `<output>/tensorboard_log/` 的 events 文件。训练后用 `logs_to_wandb.py`
+把 TB events 当唯一事实源**回填** wandb（附 launch config 与 nvidia-smi CSV 曲线），
+`record_training_details.py` 再落一份 config+环境+数据统计+loss 曲线的机读快照。
+即：**监控是事后回填式的，不是实时的**——训练中只有 tqdm 和手动 nvidia-smi。
+已知欠账（TODO 里承认）：nvidia-smi 采样没并入训练脚本，显存数字依赖手动采样。
+
+**环境的两个非显然决定**：
+- conda env 装在**本地盘**、用符号链接暴露成共享存储路径——在 Ceph 上装几万个小文件
+  既慢又冲击集群元数据（与本仓库的 KFS 扫描纪律同源）。
+- torch 用 `--no-deps` 安装后**手工钉全套 CUDA 12.4 库版本**；diffusers 装的是
+  git main（`QwenImageEditPlusPipeline` 当时未发版）——这是个**复现性风险**：
+  没钉 commit，重装可能拿到不同行为。诚实答法：requirements 给了下界版本，
+  精确环境靠训练机快照，严格复现应补 lockfile。
+- teacher（IDM-VTON，SDXL 系）与学生（DiffSynth）依赖冲突，**两套独立 env**。
 
 ---
 
@@ -886,7 +956,31 @@ GPT 样本**会重绘字幕**。同一条指令模板下给出矛盾目标，模
 解法：**在指令里显式声明**（"不处理字幕" vs "将字幕改写为 X"），
 让指令与目标严格一致。这顺带解决了 prompt 单一的问题。
 
-### 8.4 数据许可（会被问，别答错）
+### 8.4 合成产线的工程设计（2.5 万张图怎么稳定产出来）
+
+单卡 IDM 一张图约 7 秒，2.5 万张要 ~48 卡时，必须多卡 + 可断点。几个设计决定：
+
+- **连续分片而不是轮转分片**：第 i 卡拿 pairs 的第 `[n·i/N, n·(i+1)/N)` 段。
+  顺序 I/O 对 Ceph 友好，且断点恢复时每卡的进度是一段连续前缀，好推理。
+- **每卡独立 manifest**（`manifest.shard02.jsonl`）：多进程 append 同一文件会竞争丢行；
+  恢复时取**所有** manifest 的并集当"已完成集"，所以任何一卡挂掉重跑都幂等。
+- **seed = 42 + shard_id**：各卡用不同种子，避免分片间生成相关噪声。
+- **配对生成**（`make_pair_batch.py`）：随机洗牌赋值 + 冲突交换消解
+  （自配或跨批重复的人随机换衣，最多 200 轮），写盘前三重断言硬校验（见 8.1）。
+- **发布可验证**：HF 上目录=批次，每批带 `pairs_*.txt` + `batch_meta_*.json` 溯源，
+  任何人能核验批次间零重复；`images/part-XXXX/` 分桶是因为 HF 单目录 1 万文件上限。
+
+这些不是炫技——它们是"数据造错了训练白跑 2 小时、且错误静默"这个风险的对冲。
+
+### 8.5 val split 存在但没被消费（诚实答法）
+
+转换脚本切了 2% 做 `metadata_val.jsonl`，**但 DiffSynth 的训练循环不跑任何验证**——
+所以训练全程没有 val loss，7.12 节"判不出膝点"就是这个原因。
+被问「你有验证集吗」的准确回答：**拆了但框架不消费；模型选择实际依赖的是
+训练后的留出集评测**（VITON test，split 级隔离，比 2% 随机切分更干净）。
+如果续训，把 val loss 挂上是低成本高价值的第一改进。
+
+### 8.6 数据许可（会被问，别答错）
 
 | 来源 | 许可 |
 |---|---|
@@ -1501,6 +1595,63 @@ P0 是多参考训练数据（训练时随机化 `n_product_refs ∈ {1,2,3}`，
 实际输入一致）；其次是用真实帧 + GPT 输出作第二 teacher，同时解决字幕与颜色保真——
 但必须在指令里显式区分两个 teacher 的约定，否则模型学成随机二选一。
 
+**Q：teacher 具体是什么架构？**
+SDXL inpainting 底座 + 双 UNet + IP-Adapter：主 UNet 吃「加噪 latent + agnostic mask +
+DensePose」，第二个 UNet（GarmentNet）只跑服装图、逐层把特征经 attention 注入主 UNet，
+CLIP vision 再补高层语义。文本是写死的英文短句——它不接受指令。
+合成配置 fp16 / 30 步 / guidance 2.0 / seed 42+shard。（详见 4.5）
+
+**Q：训练 prompt 多样吗？**
+不多样——**全部 11,415 条是同一个 1592 字符的字符串**（同一模板 + 同一组参数：
+upper/front/无花字/单参考）。模板本身支持 back/side/尾帧/多参考/花字分支，训练全没激活。
+这是主动要交代的缺陷：业务域崩的恰是没激活的维度。
+
+**Q：有验证集吗？**
+拆了 2%（metadata_val.jsonl）但 DiffSynth 训练循环不消费它，训练全程无 val loss。
+模型选择实际靠训练后的留出集评测（VITON test，split 级隔离）。续训第一件事就是把它挂上。
+
+**Q：训练怎么监控的？**
+事后回填式：loss 只进 TensorBoard events（文本日志没有），训完用脚本回填 wandb、
+落机读快照；显存靠手动 nvidia-smi 采样。实时监控只有 tqdm——这是可改进项，不装懂。
+
+**Q：LoRA 权重为什么不能直接给 diffusers 用？**
+key 约定不同：DiffSynth 存 `pipe.dit.*.lora_A.default.weight`，diffusers 要
+`transformer.*.lora_A.weight`。逐 key 重映射后 `fuse_lora` 固化。评测前统一 fuse，
+让所有模型走同一条推理路径。
+
+**Q：推理侧怎么加速？（延伸题）**
+现在 40 步全精度是评测配置不是部署配置。路线按性价比：①步数蒸馏
+（LCM / DMD / Turbo，40→4-8 步，约 5-10×，就是 4.1 表里的第三种蒸馏）；
+②fp8/int8 量化（Ada/Hopper 上另有 ~1.5-2×）；③特征缓存类
+（DeepCache 等，利用相邻去噪步特征相似）；④CFG 蒸馏省一半前向。
+但每条都要重新过一遍换装保真评测——加速不能只报速度不报质量。
+
+**Q：SFT 之后还能做什么？（延伸题）**
+偏好对齐：Diffusion-DPO / 奖励模型。这个任务上负样本几乎免费——
+**base 的整幕重绘输出天然是 rejected**，teacher/SFT 输出当 chosen，
+就能构造偏好对；奖励信号也现成（MAD 局部性 + 商品色彩保真）。
+但前提是先把多参考的数据缺口补上——对齐修不了分布没覆盖的问题。
+
+**Q：为什么不给 Qwen 也加 mask，用 inpainting 方式微调？**
+mask 能保 locality，但①生产输入没有 mask，加了就把 IDM 的前置链依赖又请回来了；
+②本任务超出 inpainting 范围——花字替换、字幕移除、多参考融合都在"服装区域"之外；
+③指令式的价值恰恰是规则可以用自然语言表达。正确方向是用数据覆盖补 locality，
+不是用架构约束换回灵活性。
+
+**Q：没有 IDM-VTON 的话用什么造数据？**
+同类开源 try-on（CatVTON、OOTDiffusion、StableVITON）可平替，链路不变；
+或直接用 GPT Image 2 当 teacher——质量和指令跟随更好，但按张付费且数据出域，
+适合小规模补真实帧域，不适合 2.5 万张的量。所以现实方案是两个 teacher 分工（8.3）。
+
+**Q：全参微调怎么防灾难性遗忘？**
+本项目靠三件朴素的事：小 LR（1e-5）、单 epoch、任务与预训练同构（都是图像编辑）。
+没做 KL 正则/EWC/预训练数据回放。业务域上底座能力确实保住了（1 参考图时不崩）；
+LoRA 则天然保底座——只要不 fuse，随时可摘。
+
+**Q：为什么不做人工评测？**
+n=200 的双盲人评成本高且慢，而当前要分辨的失效（整幕重绘、色彩漂移）自动指标足够敏感。
+用的折中是：自动指标全量 + 差分热力图/对比大图抽样人检。若上线前做 A/B，人评必须补。
+
 ---
 
 ## 12. 最容易答错的陷阱
@@ -1525,6 +1676,10 @@ P0 是多参考训练数据（训练时随机化 `n_product_refs ∈ {1,2,3}`，
 | 「CFG 需要训练时 condition dropout」 | SFT 没做；无条件分支沿用底座预训练能力 |
 | 「这套能直接上线」 | 数据是 CC BY-NC，只能验证方法；且多参考图仍会崩 |
 | 「我搭了训练框架」 | 框架是 DiffSynth-Studio 的；我做的是数据、对照实验与评测 |
+| 「训练 prompt 是多样的」 | 全部样本是**同一个字符串**；多样性坍缩是字面事实 |
+| 「teacher 是端到端黑盒」 | SDXL inpainting + 双 UNet + IP-Adapter，mask 是架构级保证 |
+| 「训练时有 val loss 监控」 | val split 拆了但框架不消费；监控是事后回填式的 |
+| 「LoRA 权重拿来就能用」 | DiffSynth 与 diffusers 的 key 约定不同，要重映射 + fuse |
 
 ---
 
